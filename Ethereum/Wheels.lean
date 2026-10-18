@@ -274,11 +274,6 @@ inductive 𝕋 where
   | 𝕃 : (List 𝕋) → 𝕋
   deriving Repr, BEq
 
-inductive 𝕋_safe where
-  | 𝔹 : (b : ByteArray) → (h : b.size < 2^64) → 𝕋_safe
-  | 𝕃 : (List 𝕋_safe) → 𝕋_safe
-  deriving Repr
-
 
 def lengthRLP (rlp : ByteArray) : Option ℕ :=
   let len := rlp.size
@@ -407,39 +402,78 @@ def RLP (t : 𝕋) : Option ByteArray :=
 
 end
 
-private def R_b_safe (x : ByteArray) (_ : x.size < 2^64) : ByteArray :=
-  if x.size = 1 ∧ x.get! 0 < 128 then x
-  else
-    if x.size < 56 then [⟨128 + x.size⟩].toByteArray ++ x
-    else
-      let be := BE x.size
-      [⟨183 + be.size⟩].toByteArray ++ be ++ x
+
 
 mutual
 
-private def s_safe (l : List 𝕋_safe) : ByteArray :=
-  match l with
-    | [] => .empty
-    | t :: ts =>
-      match RLP_safe t, s_safe ts with
-        | rlpₗ, rlpᵣ => rlpₗ ++ rlpᵣ
+/--
+An upper bound on the size of the RLP encoding of `t`: every item contributes
+at most 9 bytes of header (one prefix byte and up to 8 bytes of length).
+-/
+def 𝕋.rlpBound : 𝕋 → ℕ
+  | .𝔹 x => x.size + 9
+  | .𝕃 l => 𝕋.rlpBoundList l + 9
 
-def R_l_safe (l : List 𝕋_safe) : ByteArray :=
-  match s_safe l with
-    | s_x =>
-      if s_x.size < 56 then
-        [⟨192 + s_x.size⟩].toByteArray ++ s_x
-      else
-        let be := BE s_x.size
-        [⟨247 + be.size⟩].toByteArray ++ be ++ s_x
-
-
-def RLP_safe (t : 𝕋_safe) : ByteArray :=
-  match t with
-    | .𝔹 ba h => R_b_safe ba h
-    | .𝕃 l => R_l_safe l
+def 𝕋.rlpBoundList : List 𝕋 → ℕ
+  | [] => 0
+  | t :: ts => t.rlpBound + 𝕋.rlpBoundList ts
 
 end
+
+private lemma BE_size_le_8 {n : ℕ} (h : n < 2^64) : (BE n).size ≤ 8 :=
+  BE_le (k := 8) h
+
+private theorem R_b_some {x : ByteArray} (h : x.size < 2^64) :
+  ∃ r, R_b x = some r ∧ r.size ≤ x.size + 9
+:= by
+  unfold R_b
+  split_ifs with h₁ h₂
+  · exact ⟨x, rfl, by omega⟩
+  · exact ⟨_, rfl, by simp; omega⟩
+  · have := BE_size_le_8 h
+    exact ⟨_, rfl, by simp; omega⟩
+
+mutual
+
+private theorem s_some : ∀ (l : List 𝕋), 𝕋.rlpBoundList l < 2^64 →
+  ∃ r, s l = some r ∧ r.size ≤ 𝕋.rlpBoundList l
+  | [], _ => ⟨.empty, by simp [s], by simp⟩
+  | t :: ts, h => by
+    simp only [𝕋.rlpBoundList] at h ⊢
+    obtain ⟨rₗ, hₗ, hsₗ⟩ := RLP_some t (by omega)
+    obtain ⟨rᵣ, hᵣ, hsᵣ⟩ := s_some ts (by omega)
+    exact ⟨rₗ ++ rᵣ, by simp [s, hₗ, hᵣ], by simp; omega⟩
+
+/--
+`RLP` succeeds whenever the encoding is guaranteed to fit, i.e. whenever every
+byte array and every list payload is shorter than 2⁶⁴ bytes. `𝕋.rlpBound`
+bounds all of these, so it suffices to bound it.
+-/
+theorem RLP_some : ∀ (t : 𝕋), t.rlpBound < 2^64 →
+  ∃ r, RLP t = some r ∧ r.size ≤ t.rlpBound
+  | .𝔹 x, h => by
+    simp only [𝕋.rlpBound] at h ⊢
+    simpa [RLP] using R_b_some (x := x) (by omega)
+  | .𝕃 l, h => by
+    simp only [𝕋.rlpBound] at h ⊢
+    obtain ⟨s_x, hs, hsize⟩ := s_some l (by omega)
+    have := BE_size_le_8 (n := s_x.size) (by omega)
+    unfold RLP R_l
+    rw [hs]
+    dsimp only
+    split_ifs
+    · exact ⟨_, rfl, by simp; omega⟩
+    · exact ⟨_, rfl, by simp; omega⟩
+    · omega
+
+end
+
+theorem RLP_isSome {t : 𝕋} (h : t.rlpBound < 2^64) : (RLP t).isSome := by
+  obtain ⟨_, hr, _⟩ := RLP_some t h
+  simp [hr]
+
+def RLP_bounded (t : 𝕋) (h : t.rlpBound < 2^64) : ByteArray :=
+  (RLP t).get (RLP_isSome h)
 
 
 def myByteArray : ByteArray := ⟨#[1, 2, 3]⟩
