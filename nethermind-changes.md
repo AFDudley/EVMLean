@@ -140,3 +140,17 @@ The [`Ethereum/Theory`](Ethereum/Theory/README.md) directory contains the proof
 development built over the EVM model. It includes results about opcode behavior,
 gas consumption, execution progress, account locality, storage preservation and
 extensionality, and return-data bounds.
+
+## Fork-Parametric Semantics
+
+The original model implemented Cancun only. The semantics is now parametric in
+the execution-layer fork (`Ethereum/Fork.lean`), covering Cancun, Prague, Osaka
+and the blob-parameter-only forks. The fork is carried in the execution
+environment and passed explicitly to `Θ`, `Lambda` and `Υ`; fork-dependent
+rules test it with `≥`. The proofs in `Ethereum/Theory` quantify over the fork,
+so they apply to every supported fork.
+
+The precompile dispatch was factored into `Ξ_PRECOMPILE`, with
+`Ξ_PRECOMPILE_induction` lifting a property of every precompile to the
+dispatch, and the access-list update of a message call into `callSubstate`.
+The `EXPMOD` precompile no longer truncates bases longer than 32 bytes.

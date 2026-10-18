@@ -15,7 +15,8 @@ upstream project, see
 [nethermind-changes.md](nethermind-changes.md).
 
 # Requirements
-- Python packages: coincurve, typing-extensions, pycryptodome, eth-typing, py-ecc
+- Python packages: coincurve, typing-extensions, pycryptodome, eth-typing, py-ecc,
+  cryptography
 
 # Project structure
 
@@ -24,6 +25,32 @@ The `Operation` describing all of the primitive operations:
 ```
 Ethereum/Operations.lean
 ```
+
+## Forks
+The semantics is parametric in the execution-layer fork, from Cancun to Osaka
+and the blob-parameter-only forks BPO1 to BPO4:
+```
+Ethereum/Fork.lean
+```
+The active fork is part of the execution environment (`ExecutionEnv.fork`) and
+an explicit argument of the message-call (`Θ`), contract-creation (`Lambda`)
+and transaction (`Υ`) functions. Each fork-dependent rule tests the fork with
+`≥`, so a rule introduced at a fork stays active afterwards. The modelled
+changes beyond Cancun are:
+
+- Prague: BLS12-381 precompiles (EIP-2537), historical block hashes in state
+  (EIP-2935), execution-layer requests (EIP-6110, EIP-7002, EIP-7251,
+  EIP-7685), the calldata cost floor (EIP-7623), the blob schedule increase
+  (EIP-7691) and set-code transactions (EIP-7702).
+- Osaka: the `EXPMOD` input bounds and repricing (EIP-7823, EIP-7883), the
+  transaction gas limit cap (EIP-7825), the blob base fee reserve price
+  (EIP-7918), the block size limit (EIP-7934), the `CLZ` opcode (EIP-7939),
+  the secp256r1 precompile (EIP-7951) and the per-transaction blob limit
+  (EIP-7594).
+- BPO1 to BPO4: blob schedules only (EIP-7892).
+
+Block-level rules (system calls, requests, header and transaction validity)
+live in the conformance driver, `Conform/TestRunner.lean`.
 
 ## EVM
 The model of the EVM state `EVM.State`:
@@ -85,6 +112,18 @@ the performance tests first and then the most expensive files. Set
 `CONFORM_TIMED=1` to write the running time of every test, slowest first, to
 `timings_1.txt`, and `CONFORM_PROGRESS=<file>` to log each test as it starts
 and finishes.
+
+The Prague and Osaka semantics are tested against the blockchain fixtures of
+[execution-spec-tests](https://github.com/ethereum/execution-specs). Fetch a
+release and point the driver at it:
+```
+scripts/fetch-eest.sh 20.0.2
+EEST_FIXTURES=.cache/eest/tests-v20.0.2/fixtures/blockchain_tests lake test -- <NUM_THREADS>
+```
+This runs every fixture network from Cancun on, including the fork transition
+networks. `CONFORM_DIRS` restricts the run to a comma-separated list of
+fixture directories, such as `for_osaka`, and `CONFORM_FILTER` to the tests
+whose name contains one of its `|`-separated substrings.
 
 # License
 

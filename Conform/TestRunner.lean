@@ -2,6 +2,7 @@ import Ethereum.State
 import Ethereum.Semantics
 import Ethereum.Gas
 import Ethereum.Wheels
+import Ethereum.Requests
 
 import Ethereum.State.TransactionOps
 import Ethereum.State.Withdrawal
@@ -112,6 +113,7 @@ private def almostBEqButNotQuite (s₁ s₂ : PersistentAccountMap) : Except Str
 end
 
 def executeTransaction
+  (fork : Fork)
   (transaction : Transaction)
   (sender : AccountAddress)
   (s : State)
@@ -120,6 +122,7 @@ def executeTransaction
 := do
   let (ypState, substate, statusCode, totalGasUsed) ←
   EVM.Υ
+      fork
       s.accountMap
       header.baseFeePerGas
       header
@@ -141,7 +144,9 @@ def executeTransaction
           , bloomFilter substate.joinLogs
           , substate.logSeries
           ⟩
-      substate
+      -- Logs accumulate over the block, for its bloom filter and for the
+      -- EIP-6110 deposit requests.
+      substate := { substate with logSeries := s.substate.logSeries ++ substate.logSeries }
     }
   pure result
 
@@ -150,6 +155,7 @@ def executeTransaction
   validation, so have to validated before.
 -/
 def validateHeaderBeforeTransactions
+  (fork : Fork)
   (blocks : ProcessedBlocks)
   (header : BlockHeader)
   : Except EVM.Exception ProcessedBlock
@@ -184,8 +190,11 @@ def validateHeaderBeforeTransactions
     throw <| .BlockException .INVALID_GASLIMIT
   if header.baseFeePerGas ≠ expectedBaseFeePerGas then
     throw <| .BlockException .INVALID_BASEFEE_PER_GAS
-  if calcExcessBlobGas parent.blockHeader != header.excessBlobGas then
+  if calcExcessBlobGas fork parent.blockHeader != header.excessBlobGas then
     throw <| .BlockException .INCORRECT_EXCESS_BLOB_GAS
+  -- EIP-7685: Prague headers, and only those, commit to the requests.
+  if (fork ≥ .prague) != header.requestsHash.isSome then
+    throw <| .BlockException .INVALID_REQUESTS
   /-
     Cancun `validate_header` rejects a block before applying its transactions
     when the header's gas used exceeds its gas limit (`GAS_USED_OVERFLOW`).
@@ -200,16 +209,27 @@ def validateHeaderBeforeTransactions
   pure parent
 
 def validateTransaction
+  (fork : Fork)
   (σ : AccountMap)
   (chainId : ℕ)
   (header : BlockHeader)
   (totalGasUsedInBlock : ℕ)
+  (blobGasUsedInBlock : ℕ)
   (T : Transaction)
   : Except EVM.Exception AccountAddress
 := do
   let H_f := header.baseFeePerGas
   if T.base.gasLimit.toNat + totalGasUsedInBlock > header.gasLimit then
     throw <| .TransactionException .GAS_ALLOWANCE_EXCEEDED
+  -- The blob gas of the block so far, with this transaction, must fit.
+  -- Before Osaka the per-transaction blob limit is the block maximum, so a
+  -- transaction over it alone breaks both caps; that is reported as the count
+  -- error (see `selectReportedException`). From Osaka on the block allowance
+  -- takes precedence.
+  if blobGasUsedInBlock + getTotalBlobGas T > fork.blobSchedule.maxBlobGas then
+    if ¬fork ≥ .osaka ∧ T.blobVersionedHashes.length > fork.blobSchedule.maxBlobs then
+      throw <| .TransactionException .TYPE_3_TX_BLOB_COUNT_EXCEEDED
+    throw <| .TransactionException .TYPE_3_TX_MAX_BLOB_GAS_ALLOWANCE_EXCEEDED
   if T.base.nonce.toNat ≥ 2^64-1 then
     throw <| .TransactionException .NONCE_IS_MAX
 
@@ -221,24 +241,46 @@ def validateTransaction
       See the 7th test for intrinsic validity, Yellow Paper, Chapter 7
     -/
     match T with
-      | .dynamic t | .blob t => t.maxFeePerGas
+      | .dynamic t | .blob t | .setCode t => t.maxFeePerGas
       | .legacy t | .access t => t.gasPrice
   if H_f > maxFeePerGas.toNat then
     throw <| .TransactionException .INSUFFICIENT_MAX_FEE_PER_GAS
 
-  let g₀ : ℕ := EVM.intrinsicGas T
+  match T with
+    | .legacy t =>
+      -- EIP-155 signatures commit to a chain id.
+      let w := t.w.toNat
+      if w ≥ 35 ∧ (w - 35) / 2 ≠ chainId then
+        throw <| .TransactionException .INVALID_CHAINID
+    | .access t | .dynamic t | .blob t | .setCode t =>
+      if t.chainId.toNat ≠ chainId then
+        throw <| .TransactionException .INVALID_CHAINID
+
+  -- EIP-7825 (Osaka): transaction gas limit cap.
+  if fork ≥ .osaka ∧ T.base.gasLimit.toNat > 2 ^ 24 then
+    throw <| .TransactionException .GAS_LIMIT_EXCEEDS_MAXIMUM
+
+  let g₀ : ℕ := EVM.intrinsicGas fork T
   if T.base.gasLimit.toNat < g₀ then
     throw <| .TransactionException .INTRINSIC_GAS_TOO_LOW
+  -- EIP-7623 (Prague)
+  if T.base.gasLimit.toNat < EVM.calldataFloorGas fork T then
+    throw <| .TransactionException .INTRINSIC_GAS_BELOW_FLOOR_GAS_COST
   match T with
-    | .dynamic t =>
+    | .dynamic t | .setCode t =>
       if t.maxPriorityFeePerGas > t.maxFeePerGas then
         throw <| .TransactionException .PRIORITY_GREATER_THAN_MAX_FEE_PER_GAS
     | .blob bt => do
+      if bt.maxPriorityFeePerGas > bt.maxFeePerGas then
+        throw <| .TransactionException .PRIORITY_GREATER_THAN_MAX_FEE_PER_GAS
       if T.base.recipient = none then
         throw <| .TransactionException .TYPE_3_TX_CONTRACT_CREATION
-      if bt.maxFeePerBlobGas.toNat < header.getBlobGasprice then
+      if bt.maxFeePerBlobGas.toNat < header.getBlobGasprice fork then
         .error (.TransactionException .INSUFFICIENT_MAX_FEE_PER_BLOB_GAS)
-      if bt.blobVersionedHashes.length > 6 then
+      -- Per-transaction blob limit: the block maximum until Osaka, where
+      -- EIP-7594 caps it at 6.
+      let blobLimit := if fork ≥ .osaka then 6 else fork.blobSchedule.maxBlobs
+      if bt.blobVersionedHashes.length > blobLimit then
         throw <| .TransactionException .TYPE_3_TX_BLOB_COUNT_EXCEEDED
       if bt.blobVersionedHashes.length = 0 then
         throw <| .TransactionException .TYPE_3_TX_ZERO_BLOBS
@@ -253,8 +295,6 @@ def validateTransaction
       if T.base.data.size > MAX_INITCODE_SIZE then
         throw <| .TransactionException .INITCODE_SIZE_EXCEEDED
     | some _ => pure ()
-
-  let some T_RLP := RLP (← (L_X T)) | throw <| .TransactionException .IllFormedRLP
 
   let r : ℕ := fromByteArrayBigEndian T.base.r
   let s : ℕ := fromByteArrayBigEndian T.base.s
@@ -271,8 +311,21 @@ def validateTransaction
             (w - 35) % 2
           else
             w
-      | .access t | .dynamic t | .blob t => t.yParity.toNat
+      | .access t | .dynamic t | .blob t | .setCode t => t.yParity.toNat
   if v ∉ [0, 1] then throw <| .TransactionException .INVALID_SIGNATURE_VRS
+
+  match T with
+    | .setCode t =>
+      if ¬fork ≥ .prague then
+        throw <| .TransactionException .TYPE_4_TX_PRE_FORK
+      if t.authorizationList.isEmpty then
+        throw <| .TransactionException .TYPE_4_EMPTY_AUTHORIZATION_LIST
+      if t.recipient.isNone then
+        throw <| .TransactionException .TYPE_4_TX_CONTRACT_CREATION
+    | _ => pure ()
+
+  -- The signing payload is built once the signature values are known valid.
+  let some T_RLP := RLP (← (L_X T)) | throw <| .TransactionException .IllFormedRLP
 
   let h_T := -- (318)
     match T with
@@ -294,7 +347,9 @@ def validateTransaction
         dbg_trace s!"could not find sender {Ethereum.toHex S_T.toByteArray}"
         (.empty, ⟨0⟩, ⟨0⟩)
 
-  if senderCode ≠ .empty then throw <| .TransactionException .SENDER_NOT_EOA
+  -- EIP-7702 (Prague): a delegated account still originates transactions.
+  if senderCode ≠ .empty ∧ ¬(fork ≥ .prague ∧ isDelegationDesignation senderCode) then
+    throw <| .TransactionException .SENDER_NOT_EOA
   if T.base.nonce < senderNonce then
     throw <| .TransactionException .NONCE_MISMATCH_TOO_LOW
   if T.base.nonce > senderNonce then
@@ -306,7 +361,7 @@ def validateTransaction
     match T with
       | .legacy t | .access t =>
         t.gasLimit.toNat * t.gasPrice.toNat + t.value.toNat
-      | .dynamic t =>
+      | .dynamic t | .setCode t =>
         t.gasLimit.toNat * t.maxFeePerGas.toNat + t.value.toNat
       | .blob t =>
         t.gasLimit.toNat * t.maxFeePerGas.toNat
@@ -393,15 +448,38 @@ def validateTransaction
           , .𝔹 (BE t.maxFeePerBlobGas.toNat)
           , .𝕃 (t.blobVersionedHashes.map .𝔹)
           ]
+      | /- 4 -/ .setCode t =>
+        let authorizationRLP (a : Authorization) : 𝕋 :=
+          .𝕃
+            [ .𝔹 (BE a.chainId.toNat)
+            , .𝔹 a.address.toByteArray
+            , .𝔹 (BE a.nonce.toNat)
+            , .𝔹 (BE a.yParity.toNat)
+            , .𝔹 a.r
+            , .𝔹 a.s
+            ]
+        .ok ∘ .𝕃 <|
+          [ .𝔹 (BE t.chainId.toNat) -- T_c
+          , .𝔹 (BE t.nonce.toNat) -- Tₙ
+          , .𝔹 (BE t.maxPriorityFeePerGas.toNat) -- T_f
+          , .𝔹 (BE t.maxFeePerGas.toNat) -- Tₘ
+          , .𝔹 (BE t.gasLimit.toNat) -- T_g
+          , .𝔹 (t.recipient.option .empty AccountAddress.toByteArray) -- Tₜ
+          , .𝔹 (BE t.value.toNat) -- Tᵥ
+          , .𝔹 t.data -- p
+          , accessEntriesRLP t.accessList -- T_A
+          , .𝕃 (t.authorizationList.map authorizationRLP)
+          ]
 
 def validateBlock
+  (fork : Fork)
   (state : State)
   (parentHeader : BlockHeader)
   (block : DeserializedBlock)
   : Except EVM.Exception Unit
 := do
 
-  let MAX_BLOB_GAS_PER_BLOCK := 786432
+  let MAX_BLOB_GAS_PER_BLOCK := fork.blobSchedule.maxBlobGas
   let blobGasUsed ← block.transactions.array.foldlM (init := 0) λ blobSum t ↦ do
     let blobSum := blobSum + getTotalBlobGas t
     if blobSum > MAX_BLOB_GAS_PER_BLOCK then
@@ -465,6 +543,10 @@ A reported exception is accepted when the fixture lists either form.
 -/
 def legacyExceptionNames (reported : String) : List String :=
   match reported with
+  -- The execution specs raise one error for both intrinsic gas bounds
+  -- (EIP-7623); some fixtures name it after the regular bound.
+  | "TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST" =>
+      ["TransactionException.INTRINSIC_GAS_TOO_LOW"]
   | "TransactionException.INTRINSIC_GAS_TOO_LOW" =>
       ["TR_IntrinsicGas", "IntrinsicGas", "TR_NoFundsOrGas"]
   | "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS" =>
@@ -507,9 +589,9 @@ def legacyExceptionNames (reported : String) : List String :=
   | _ => []
 
 /--
-A transaction with more than six blobs breaks both Cancun caps: the per-transaction
-blob count and the block blob-gas allowance. Validation reports the count error
-first. When the fixture instead names the block allowance, report that name.
+Before Osaka, a transaction with more blobs than the block maximum breaks both
+caps: the per-transaction blob count and the block blob-gas allowance.
+Validation reports the count error first. When the fixture instead names the block allowance, report that name.
 The two errors stay distinct for every other case, including several transactions
 whose blob counts are each at most six but sum past the block cap.
 -/
@@ -533,9 +615,54 @@ def deserializeRawBlock (rawBlock : RawBlock)
   pure <| .mk blockHash blockHeader transactions withdrawals rawBlock.exception
 
 /--
+A system call (EIP-4788, EIP-2935, EIP-7002, EIP-7251): a message call from
+`SYSTEM_ADDRESS` to `contract` that is not charged to the block. A checked call
+(the request contracts) invalidates the block when the contract has no code or
+the call fails. An unchecked call to an account without code does nothing.
+-/
+def executeSystemCall
+  (fork : Fork)
+  (s : State)
+  (header : BlockHeader)
+  (contract : AccountAddress)
+  (input : ByteArray)
+  (checked : Bool)
+  : Except EVM.Exception (State × ByteArray)
+:= do
+  let code := s.accountMap.get? contract |>.option .empty (·.code)
+  if code.isEmpty then
+    if checked then throw <| .BlockException .SYSTEM_CONTRACT_EMPTY
+    return (s, .empty)
+  let (σ, _, _, success, output) :=
+    EVM.Θ fork
+      s.accountMap
+      s.accountMap
+      default
+      SYSTEM_ADDRESS
+      SYSTEM_ADDRESS
+      contract
+      (.Code code)
+      (.ofNat SYSTEM_TRANSACTION_GAS)
+      (.ofNat header.baseFeePerGas)
+      ⟨0⟩
+      ⟨0⟩
+      input
+      0
+      header
+      []
+      s.executionEnv.blocks
+      true
+  if checked ∧ ¬success then throw <| .BlockException .SYSTEM_CONTRACT_CALL_FAILED
+  pure ({ s with accountMap := σ }, output)
+
+/-- EIP-7934 (Osaka): the maximum RLP size of a block. -/
+def MAX_RLP_BLOCK_SIZE : ℕ := 10485760 - 2097152
+
+/--
 This assumes that the `transactions` are ordered, as they should be in the test suit.
 -/
 def processBlocks
+  (config : ChainConfig)
   (pre : Pre)
   (blocks : RawBlocks)
   (genesisRLP : ByteArray)
@@ -557,10 +684,13 @@ def processBlocks
       λ accState rawBlock ↦ do
         try
           let block ← deserializeRawBlock rawBlock
+          let fork := config.activeFork block.blockHeader.timestamp
+          if fork ≥ .osaka ∧ rawBlock.rlp.size > MAX_RLP_BLOCK_SIZE then
+            throw <| .BlockException .RLP_BLOCK_LIMIT_EXCEEDED
           let parent ←
-            validateHeaderBeforeTransactions accState.executionEnv.blocks block.blockHeader
-          let accState ← processBlock {accState with accountMap := parent.σ} block
-          validateBlock accState parent.blockHeader block
+            validateHeaderBeforeTransactions fork accState.executionEnv.blocks block.blockHeader
+          let accState ← processBlock fork {accState with accountMap := parent.σ} block
+          validateBlock fork accState parent.blockHeader block
           if ¬block.exception.isEmpty then
             throw <| .MissedExpectedException block.exception
           pure
@@ -575,73 +705,67 @@ def processBlocks
             | _ =>
               let e := selectReportedException rawBlock.exception e
               if acceptsExpectedException rawBlock.exception e then
-                -- dbg_trace
-                --   s!"Expected exception: {String.intercalate "|" rawBlock.exception}; got exception: {repr e}"
                 pure accState
               else
                 throw e
   pure state
  where
   processBlock
+    (fork : Fork)
     (s₀ : State)
     (block : DeserializedBlock)
     : Except EVM.Exception State
   := do
-    -- Beacon call
-    let s ← do
-      let BEACON_ROOTS_ADDRESS : AccountAddress :=
-        0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02
-      let SYSTEM_ADDRESS : AccountAddress :=
-        0xfffffffffffffffffffffffffffffffffffffffe
-      match s₀.accountMap.get? BEACON_ROOTS_ADDRESS with
-        | none => pure s₀
-        | some roots =>
-          let beaconRootsAddressCode := roots.code
-          -- the call does not count against the block’s gas limit
-          let beaconCallResult :=
-          EVM.Θ
-              s₀.accountMap
-              s₀.accountMap
-              default
-              SYSTEM_ADDRESS
-              SYSTEM_ADDRESS
-              BEACON_ROOTS_ADDRESS
-              (.Code beaconRootsAddressCode)
-              ⟨30000000⟩
-              ⟨0xe8d4a51000⟩
-              ⟨0⟩
-              ⟨0⟩
-              block.blockHeader.parentBeaconBlockRoot
-              0
-              block.blockHeader
-              []
-              s₀.executionEnv.blocks
-              true
-          let σ ←
-            match beaconCallResult with
-              | (σ, _, _, _ /- can't fail-/, _) => pure σ
-          let s := {s₀ with accountMap := σ}
-          pure s
+    let header := block.blockHeader
+    -- Receipts and logs are per block.
+    let s₀ := { s₀ with totalGasUsedInBlock := 0, transactionReceipts := .empty, substate := default }
+    -- EIP-4788 beacon block root
+    let (s, _) ←
+      executeSystemCall fork s₀ header BEACON_ROOTS_ADDRESS header.parentBeaconBlockRoot false
+    -- EIP-2935 (Prague): parent block hash
+    let (s, _) ←
+      if fork ≥ .prague then
+        executeSystemCall fork s header HISTORY_STORAGE_ADDRESS header.parentHash.toByteArray false
+      else pure (s, .empty)
 
     -- Transactions execution
-    let s ←
+    let (s, _) ←
       block.transactions.array.foldlM
-        (λ s' trans ↦ do
+        (λ (s', blobGasUsed) trans ↦ do
           let S_T ←
             validateTransaction
+              fork
               s'.accountMap
               chainId
-              block.blockHeader
+              header
               s'.totalGasUsedInBlock
+              blobGasUsed
               trans
-          executeTransaction trans S_T s' block.blockHeader
+          pure (← executeTransaction fork trans S_T s' header, blobGasUsed + getTotalBlobGas trans)
         )
-        {s with totalGasUsedInBlock := 0, transactionReceipts := .empty}
+        (s, 0)
 
     -- Withdrawals execution
     let σ := applyWithdrawals s.accountMap block.withdrawals.array
+    let s := { s with accountMap := σ }
 
-    pure { s with accountMap := σ }
+    -- EIP-7685 (Prague): requests
+    if fork ≥ .prague then
+      let deposits ←
+        (depositRequests s.substate.logSeries).mapError λ _ ↦
+          .BlockException .INVALID_DEPOSIT_EVENT_LAYOUT
+      let (s, withdrawalRequests) ←
+        executeSystemCall fork s header WITHDRAWAL_REQUEST_ADDRESS .empty true
+      let (s, consolidationRequests) ←
+        executeSystemCall fork s header CONSOLIDATION_REQUEST_ADDRESS .empty true
+      let requestsHash ←
+        (computeRequestsHash [(0, deposits), (1, withdrawalRequests), (2, consolidationRequests)]).mapError
+          λ _ ↦ .BlockException .INVALID_REQUESTS
+      if header.requestsHash ≠ some requestsHash then
+        throw <| .BlockException .INVALID_REQUESTS
+      pure s
+    else
+      pure s
 
 /--
 - `.none` on success
@@ -652,7 +776,7 @@ NB we can throw away the final state if it coincided with the expected one, henc
 def preImpliesPost (entry : TestEntry)
   : Except EVM.Exception (Option (PersistentAccountMap))
 := do
-    let resultState ← processBlocks entry.pre entry.blocks entry.genesisRLP
+    let resultState ← processBlocks entry.config entry.pre entry.blocks entry.genesisRLP
     let lastAccountMap :=
       resultState.executionEnv.blocks.findRev? (·.hash == entry.lastblockhash)
       |>.option resultState.accountMap ProcessedBlock.σ
@@ -733,7 +857,7 @@ def processTests (tests : Array TestId) (isTimed : Option Nat := .none) :
       | .error _ => IO.eprintln s!"Cannot parse: {testId}"
                     discarded := discarded.push testId
       | .ok test =>
-          if test.network.startsWith "Cancun" then
+          if (ForkNetwork.parse? test.network).isSome then
             let start ← IO.monoMsNow
             if let some progress := progress then
               IO.FS.withFile progress .append (·.putStrLn s!"start {testName} FROM {path}")

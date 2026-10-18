@@ -36,8 +36,15 @@ private def getObjValsExt?
   let vals ← json.getObjVals? α β
   pure <| vals.toList.foldl (fun acc (key, value) => acc.insert key value) ∅
 
+/-
+The storage trie has no entries for zero-valued slots, but some fixtures list
+such slots explicitly. They are dropped so that they cannot affect the state
+root.
+-/
 instance : FromJson Storage where
-  fromJson? json := getObjValsExt? json UInt256 UInt256
+  fromJson? json := do
+    let storage ← getObjValsExt? json UInt256 UInt256
+    pure <| storage.filter fun _ value => value ≠ ⟨0⟩
 
 instance : FromJson ByteArray := fromBlobString (ByteArray.ofBlob)
 
@@ -80,6 +87,7 @@ instance : FromJson BlockHeader where
         withdrawalsRoot       := ← json.getObjValAsD! ByteArray      "withdrawalsRoot"
         blobGasUsed           := ← json.getObjValAsD! UInt64         "blobGasUsed"
         excessBlobGas         := ← json.getObjValAsD! UInt64         "excessBlobGas"
+        requestsHash          := ← json.getObjValAsD! (Option ByteArray) "requestsHash"
       }
     catch ε => dbg_trace s!"Cannot parse BlockHeader: {ε}\n json: {json}"
                default
@@ -164,6 +172,32 @@ private def blockOfJson (json : Json) : Except String RawBlock := do
 
 instance : FromJson RawBlock := ⟨blockOfJson⟩
 
+/--
+The chain configuration of a fixture. The model fixes the blob schedule of
+each fork, so a fixture whose `config.blobSchedule` disagrees is rejected.
+-/
+def parseChainConfig (json : Json) (networkName : String) : Except String ChainConfig := do
+  let some network := ForkNetwork.parse? networkName
+    | throw s!"unsupported network: {networkName}"
+  let config ← json.getObjValAsD Json "config" (.obj {})
+  let chainId ←
+    match config.getObjVal? "chainid" with
+    | .ok value => FromJson.fromJson? value
+    | .error _ => pure 1
+  if chainId ≠ Ethereum.chainId then
+    throw s!"unsupported chain id: {chainId}"
+  let schedules ← config.getObjValAsD Json "blobSchedule" (.obj {})
+  for fork in Fork.all do
+    if let .ok entry := schedules.getObjVal? fork.name then
+      let schedule : BlobSchedule := {
+        targetBlobs := ← entry.getObjValAs? ℕ "target"
+        maxBlobs := ← entry.getObjValAs? ℕ "max"
+        baseFeeUpdateFraction := ← entry.getObjValAs? ℕ "baseFeeUpdateFraction"
+      }
+      if schedule ≠ fork.blobSchedule then
+        throw s!"blob schedule of {fork.name} differs from the model"
+  pure { network, chainId }
+
 instance : FromJson TestEntry where
   fromJson? json := do
     let post : PostState ←
@@ -178,6 +212,7 @@ instance : FromJson TestEntry where
       genesisRLP         := ← json.getObjValAs? ByteArray "genesisRLP"
       lastblockhash      := ← json.getObjValAs? UInt256 "lastblockhash"
       network            := ← json.getObjValAs? String "network"
+      config             := ← parseChainConfig json (← json.getObjValAs? String "network")
       postState          := post
       pre                := ← json.getObjValAs? Pre "pre"
       sealEngine         := ← json.getObjValAs? Json "sealEngine"

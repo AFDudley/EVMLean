@@ -5,6 +5,7 @@ import Ethereum.Operations
 import Ethereum.Wheels
 import Ethereum.State.Withdrawal
 import Ethereum.State.Block
+import Ethereum.Fork
 
 import Ethereum.State
 
@@ -82,6 +83,7 @@ structure TestEntry where
   genesisRLP         : ByteArray
   lastblockhash      : UInt256
   network            : String
+  config             : ChainConfig
   postState          : PostState
   pre                : Pre
   sealEngine         : Json := ""

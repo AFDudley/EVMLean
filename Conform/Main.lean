@@ -113,11 +113,15 @@ def testFiles (roots              : Array System.FilePath)
               (phase              : ℕ)
               (threads            : ℕ := 1) : IO (Nat × Array String) := do
   let isSlowTest (testname : String) := slowTests.any (isTest · testname)
+  -- `CONFORM_FILTER` selects the tests whose name contains one of its
+  -- `|`-separated substrings.
+  let filter := (← IO.getEnv "CONFORM_FILTER").getD ""
   let isToBeTested (testname : String) : Bool :=
     let whitelist := testWhitelist
     let blacklist := testBlacklist ++ Ethereum.Conform.GlobalBlacklist
     testname ∉ blacklist ∧ (whitelist.isEmpty ∨ testname ∈ whitelist) ∧
-      ¬(skipSlow ∧ isSlowTest testname)
+      ¬(skipSlow ∧ isSlowTest testname) ∧
+      (filter.isEmpty ∨ (filter.splitOn "|").any (fun f => (testname.splitOn f).length > 1))
 
   let mut found := #[]
   for root in roots do
@@ -135,10 +139,10 @@ def testFiles (roots              : Array System.FilePath)
     | .error _ => panic! "Malformed test json."
     | .ok x =>
         let names := x.toArray.filterMap fun (name, val) =>
-          let isCancun := match val.getObjVal? "network" >>= Lean.Json.getStr? with
-            | .ok network => network.startsWith "Cancun"
+          let supported := match val.getObjVal? "network" >>= Lean.Json.getStr? with
+            | .ok network => (Ethereum.ForkNetwork.parse? network).isSome
             | .error _ => false
-          if isCancun && isToBeTested name then some name else none
+          if supported && isToBeTested name then some name else none
         selected := selected.push (path, x.size, names)
 
   if ←System.FilePath.pathExists (logFile phase) then IO.FS.removeFile (logFile phase)
@@ -211,6 +215,28 @@ def main (args : List String) : IO UInt32 := do
       "static_Call50000_sha256_d1g0v0_Cancun",
       "CALLBlake2f_MaxRounds_d0g0v0_Cancun"]
   let skipPerf := (← IO.getEnv "CONFORM_SKIP_PERF").isSome
+
+  /-
+    `execution-spec-tests` blockchain fixtures, e.g. as fetched by
+    `scripts/fetch-eest.sh`: every network from Cancun on.
+  -/
+  if let some fixtures := ← IO.getEnv "EEST_FIXTURES" then
+    let fixtures : System.FilePath := fixtures
+    let directories : Array System.FilePath :=
+      #["for_cancun", "for_cancuntopragueattime15k", "for_prague", "for_praguetoosakaattime15k",
+        "for_osaka", "for_osakatobpo1attime15k", "for_bpo1tobpo2attime15k",
+        "for_bpo2tobpo3attime15k", "for_bpo3tobpo4attime15k"]
+    -- `CONFORM_DIRS` restricts the run to a comma-separated list of directories.
+    let selected := (← IO.getEnv "CONFORM_DIRS").map (·.splitOn ",")
+    let roots ← directories.filterMapM λ d ↦ do
+      let root := fixtures / d
+      let wanted := selected.all (·.contains d.toString)
+      pure <| if wanted ∧ (← root.pathExists) then some root else none
+    IO.println s!"EEST fixtures in {fixtures}: {roots.size} directories."
+    (← IO.getStdout).flush
+    let failed ← testFiles (roots := roots) (phase := 1) (threads := NumThreads) >>= printResults
+    return if failed.isEmpty then 0 else 1
+
   IO.println <|
     if skipPerf then "Conformance tests, without the performance tests."
     else "Conformance tests, including the performance tests."
