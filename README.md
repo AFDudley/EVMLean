@@ -83,12 +83,9 @@ implementations compute the correct cryptographic values; conformance testing
 remains the behavioral check for those implementations.
 
 ## Conformance testing
-A git submodule with EVM conformance tests is in:
-```
-EthereumTests/
-```
-
-The test running infrastructure can be found in:
+The model is tested against the blockchain fixtures of
+[execution-spec-tests](https://github.com/ethereum/execution-specs), pinned to
+release `tests@v20.0.2`. The test running infrastructure can be found in:
 ```
 Conform/
 ```
@@ -97,33 +94,33 @@ Passing this suite is the baseline behavioral trust check for the executable EVM
 model. Any changes are accepted under the constraint that these
 conformance tests continue to pass.
 
-To execute conformance tests, make sure the `EthereumTests` directory is the appropriate git submodule and run:
-```
-lake test -- <NUM_THREADS> 2> out_discard.txt
-```
-where `<NUM_THREADS>` is the number of threads running conformance tests in parallel. Note that the default is `1`.
-We recommend redirecting `stderr` into a file to not pollute the output.
-
-The run includes the performance tests (`vmPerformance`), a few of which take
-minutes; set `CONFORM_SKIP_PERF=1` to leave them out, as CI does.
-
-The threads take fixture files, or slices of large ones, from a shared queue,
-the performance tests first and then the most expensive files. Set
-`CONFORM_TIMED=1` to write the running time of every test, slowest first, to
-`timings_1.txt`, and `CONFORM_PROGRESS=<file>` to log each test as it starts
-and finishes.
-
-The Prague and Osaka semantics are tested against the blockchain fixtures of
-[execution-spec-tests](https://github.com/ethereum/execution-specs). Fetch a
-release and point the driver at it:
+Fetch the fixtures once, then run the conformance tests:
 ```
 scripts/fetch-eest.sh 20.0.2
-EEST_FIXTURES=.cache/eest/tests-v20.0.2/fixtures/blockchain_tests lake test -- <NUM_THREADS>
+lake test -- <NUM_THREADS> 2> out_discard.txt
 ```
+where `<NUM_THREADS>` is the number of threads running conformance tests in
+parallel; it defaults to the number of processors. We recommend redirecting
+`stderr` into a file to not pollute the output.
+
 This runs every fixture network from Cancun on, including the fork transition
-networks. `CONFORM_DIRS` restricts the run to a comma-separated list of
-fixture directories, such as `for_osaka`, and `CONFORM_FILTER` to the tests
-whose name contains one of its `|`-separated substrings.
+networks. The threads take fixture files, or slices of large ones, from a
+shared queue, slow tests first and then the most expensive files. The
+following environment variables adjust a run:
+
+- `EEST_FIXTURES` points to another `fixtures/blockchain_tests` directory.
+- `CONFORM_DIRS` restricts the run to a comma-separated list of fixture
+  directories, such as `for_osaka`.
+- `CONFORM_FILTER` restricts the run to the tests whose name contains one of
+  its `|`-separated substrings.
+- `CONFORM_TIMED=1` writes the running time of every test, slowest first, to
+  `timings_1.txt`, and `CONFORM_PROGRESS=<file>` logs each test as it starts
+  and finishes.
+- `CONFORM_SUITE=legacy` runs the Cancun suite of the `EthereumTests` git
+  submodule instead of the fixtures. Fetch it with
+  `git submodule update --init --recursive EthereumTests`. It includes
+  performance tests (`vmPerformance` and a few others), which take up to an
+  hour each; `CONFORM_SKIP_PERF=1` leaves them out.
 
 # License
 
