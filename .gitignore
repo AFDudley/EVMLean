@@ -8,3 +8,4 @@ blake2/
 keccak256/
 out_*
 Ethereum/EllipticCurvesPy/trieInput_*
+/.cache/

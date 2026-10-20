@@ -77,6 +77,14 @@ lake test -- <NUM_THREADS> 2> out_discard.txt
 where `<NUM_THREADS>` is the number of threads running conformance tests in parallel. Note that the default is `1`.
 We recommend redirecting `stderr` into a file to not pollute the output.
 
+The threads take fixture files, or slices of large ones, from a shared queue,
+most expensive first. Set `CONFORM_TIMED=1` to write the running time of every
+test, slowest first, to `timings_<phase>.txt`.
+
+The Python helpers in `Ethereum/EllipticCurvesPy` are run by long-lived
+processes (`Ethereum/PythonHelper.lean` and `helper_server.py`) rather than
+one process per call, which used to dominate the cost of a test.
+
 # License
 
 This repository is based on Nethermind's [EVMYulLean](https://github.com/NethermindEth/EVMYulLean), which is licensed under the Apache License, Version 2.0. This modified copy is distributed under the Apache License, Version 2.0; see [LICENSE](LICENSE).

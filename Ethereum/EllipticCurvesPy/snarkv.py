@@ -11,7 +11,8 @@ from alt_bn128 import (
     pairing,
 )
 
-data = bytes.fromhex(sys.argv[1])
+encoded = sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read().strip()
+data = bytes.fromhex(encoded)
 
 # OPERATION
 if len(data) % 192 != 0:

@@ -704,8 +704,12 @@ def processTest (entry : TestEntry) (isTimed : Option (Nat × TestId) := .none) 
               s!"\npost: {Ethereum.toHex h} \nactual: {Ethereum.toHex <$> stateTrieRoot σ}"
         errorF := if verbose then verboseError else discardError
 
+/--
+Run `tests`, parsing each fixture file once. Every result comes with the
+test's running time in milliseconds.
+-/
 def processTests (tests : Array TestId) (isTimed : Option Nat := .none) :
-                 IO (Array TestId × Array (TestId × TestResult)) := do
+                 IO (Array TestId × Array (TestId × TestResult × Nat)) := do
   let mut groups : Array (System.FilePath × Array String) := #[]
   let mut idx : Std.HashMap System.FilePath Nat := ∅
   for (path, name) in tests do
@@ -715,8 +719,11 @@ def processTests (tests : Array TestId) (isTimed : Option Nat := .none) :
     | none =>
         idx := idx.insert path groups.size
         groups := groups.push (path, #[name])
+  -- `CONFORM_PROGRESS` names a file that records each test as it starts and
+  -- finishes, to see which tests are running.
+  let progress := (← IO.getEnv "CONFORM_PROGRESS").map System.FilePath.mk
   let mut discarded : Array TestId := .empty
-  let mut results : Array (TestId × TestResult) := .empty
+  let mut results : Array (TestId × TestResult × Nat) := .empty
   for (path, names) in groups do
     let file ← Lean.Json.fromFile path
     for testName in names do
@@ -727,8 +734,14 @@ def processTests (tests : Array TestId) (isTimed : Option Nat := .none) :
                     discarded := discarded.push testId
       | .ok test =>
           if test.network.startsWith "Cancun" then
+            let start ← IO.monoMsNow
+            if let some progress := progress then
+              IO.FS.withFile progress .append (·.putStrLn s!"start {testName} FROM {path}")
             let res ← processTest test <| isTimed <&> (·, testId)
-            results := results.push (testId, res)
+            let elapsed := (← IO.monoMsNow) - start
+            if let some progress := progress then
+              IO.FS.withFile progress .append (·.putStrLn s!"done {elapsed}ms {testName}")
+            results := results.push (testId, res, elapsed)
   return (discarded, results)
 
 end Conform

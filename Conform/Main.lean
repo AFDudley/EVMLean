@@ -29,28 +29,85 @@ def directoryBlacklist : List System.FilePath := []
 
 def fileBlacklist : List System.FilePath := []
 
-def testFiles (root               : System.FilePath)
+/--
+A unit of work: tests of one fixture file, run by one thread, which parses the
+file once. `cost` estimates the unit's running time, for scheduling.
+-/
+structure WorkUnit where
+  path  : System.FilePath
+  names : Array String
+  cost  : ℕ
+
+/--
+Split the selected tests of each fixture file into work units. A large file is
+split into up to `threads` units, so that its tests spread over the threads; a
+unit's cost is its share of the file's size.
+-/
+def workUnits (threads : ℕ) (files : Array (System.FilePath × ℕ × Array String)) :
+    IO (Array WorkUnit) := do
+  let largeFile : ℕ := 4 * 1024 * 1024
+  let mut units := #[]
+  for (path, total, names) in files do
+    if names.isEmpty then continue
+    let size := (← path.metadata).byteSize.toNat
+    let pieces := if size > largeFile then min threads names.size else 1
+    let chunk := (names.size + pieces - 1) / pieces
+    for k in [0:pieces] do
+      let part := names.extract (k * chunk) ((k + 1) * chunk)
+      unless part.isEmpty do
+        units := units.push { path, names := part, cost := size * part.size / max total 1 }
+  return units.qsort (·.cost > ·.cost)
+
+/--
+Run the work units on `threads` threads. Each thread repeatedly takes the
+next unit from a shared queue, most expensive first, so that threads finish
+together.
+-/
+def runWorkUnits (units : Array WorkUnit) (threads : ℕ) :
+    IO (Array Ethereum.Conform.TestId × Array (Ethereum.Conform.TestId × Ethereum.Conform.TestResult × ℕ)) := do
+  let next ← IO.mkRef 0
+  let worker : IO (Array Ethereum.Conform.TestId × Array (Ethereum.Conform.TestId × Ethereum.Conform.TestResult × ℕ)) := do
+    let mut discarded := #[]
+    let mut results := #[]
+    repeat
+      let i ← next.modifyGet fun i => (i, i + 1)
+      let some unit := units[i]? | break
+      let (d, r) ← Ethereum.Conform.processTests (unit.names.map (unit.path, ·))
+      discarded := discarded ++ d
+      results := results ++ r
+    return (discarded, results)
+  let mut tasks := #[]
+  for _ in [0:max threads 1] do
+    tasks := tasks.push (← IO.asTask worker .dedicated)
+  let mut discarded := #[]
+  let mut results := #[]
+  for task in tasks do
+    let (d, r) ← IO.ofExcept task.get
+    discarded := discarded ++ d
+    results := results ++ r
+  return (discarded, results)
+
+def testFiles (roots              : Array System.FilePath)
               (directoryBlacklist : Array System.FilePath := #[])
               (fileBlacklist      : Array System.FilePath := #[])
               (testBlacklist      : Array String := #[])
               (testWhitelist      : Array String := #[])
               (phase              : ℕ)
-              (threads            : ℕ := 1)
-              (timed              : Bool := false)
-              (clearLog           : Bool := true) : IO (Nat × Array String) := do
+              (threads            : ℕ := 1) : IO (Nat × Array String) := do
   let isToBeTested (testname : String) : Bool :=
     let whitelist := testWhitelist
     let blacklist := testBlacklist ++ Ethereum.Conform.GlobalBlacklist
     testname ∉ blacklist ∧ (whitelist.isEmpty ∨ testname ∈ whitelist)
 
-  let testFiles ←
-    Array.filter isTestFile <$>
-      System.FilePath.walkDir root (pure <| · ∉ directoryBlacklist)
+  let mut found := #[]
+  for root in roots do
+    found := found ++ Array.filter isTestFile
+      (← System.FilePath.walkDir root (pure <| · ∉ directoryBlacklist))
 
-  let testFiles := testFiles.filter (· ∉ fileBlacklist)
+  let testFiles := found.filter (· ∉ fileBlacklist)
   let testFiles := testFiles.filter fun p => p.components.all (· != ".meta")
 
-  let mut testNames : Array (System.FilePath × Array String) := #[]
+  let mut selected : Array (System.FilePath × ℕ × Array String) := #[]
   for path in testFiles do
     let json ← Lean.Json.fromFile path
     match json.getObj? with
@@ -61,44 +118,34 @@ def testFiles (root               : System.FilePath)
             | .ok network => network.startsWith "Cancun"
             | .error _ => false
           if isCancun && isToBeTested name then some name else none
-        testNames := testNames.push (path, names)
+        selected := selected.push (path, x.size, names)
 
-  let mut discardedFiles : Array Ethereum.Conform.TestId := #[]
-  let mut numSuccess := 0
+  if ←System.FilePath.pathExists (logFile phase) then IO.FS.removeFile (logFile phase)
 
-  if clearLog then
-    if ←System.FilePath.pathExists (logFile phase) then IO.FS.removeFile (logFile phase)
-
-  let mut tasks : Array (Task _) := .empty
-  let mut thread := 0
-  let mut tests : Array (Array (System.FilePath × String)) := .replicate threads #[]
-
-  IO.println s!"Scheduling tests for parallel execution..."
-  for (path, names) in testNames do
-    for name in names do
-      tests := tests.set! thread (tests[thread]! |>.push (path, name))
-      thread := thread + 1; thread := thread % threads
-  for i in [0:threads] do
-    tasks := tasks.push (←IO.asTask <| Ethereum.Conform.processTests tests[i]! (if timed then .some i else .none))
-
-  let mut failedTests : Array String := .empty
-
-  IO.println s!"Scheduled {tests.foldl (· + ·.size) 0} tests on {threads} thread{if threads == 1 then "" else "s"}."
+  let units ← workUnits threads selected
+  let scheduled := units.foldl (· + ·.names.size) 0
+  IO.println s!"Scheduled {scheduled} tests in {units.size} units on {threads} thread{if threads == 1 then "" else "s"}."
   IO.println s!"Running..."
   (← IO.getStdout).flush
-  let mut testResults := #[]
-  for task in tasks do
-    testResults := testResults.push (← IO.wait task >>= IO.ofExcept)
-  for (discarded, batch) in testResults do
-    discardedFiles := discardedFiles.append discarded
-    for ((file, test), res) in batch do
-      log file test res phase
-      match res with
-      | none => numSuccess := numSuccess + 1
-      | some err =>
-        failedTests := failedTests.push s!"{file.fileName.get!}[{test}]"
-        IO.FS.withFile liveFailureLog .append fun h =>
-          h.putStrLn s!"{file.fileName.get!}[{test}] {err}"
+  let (_, results) ← runWorkUnits units threads
+
+  let mut numSuccess := 0
+  let mut failedTests : Array String := .empty
+  for ((file, test), res, _) in results do
+    log file test res phase
+    match res with
+    | none => numSuccess := numSuccess + 1
+    | some err =>
+      failedTests := failedTests.push s!"{file.fileName.get!}[{test}]"
+      IO.FS.withFile liveFailureLog .append fun h =>
+        h.putStrLn s!"{file.fileName.get!}[{test}] {err}"
+
+  -- `CONFORM_TIMED` writes the running time of every test, slowest first.
+  if (← IO.getEnv "CONFORM_TIMED").isSome then
+    let timings := results.qsort (·.2.2 > ·.2.2)
+    IO.FS.withFile s!"timings_{phase}.txt" .write fun h =>
+      for ((file, test), _, ms) in timings do
+        h.putStrLn s!"{ms.toFloat / 1000.0}s {file}[{test}]"
   return (numSuccess, failedTests)
 
 def nproc : IO Nat := do
@@ -139,33 +186,21 @@ def main (args : List String) : IO UInt32 := do
 
   IO.println s!"Phase 1/3 - No performance tests."
   (← IO.getStdout).flush
-  let failed₁a ← testFiles (root := "EthereumTests/BlockchainTests/")
-                          (testBlacklist := DelayFiles)
-                          (phase := 1)
-                          (threads := NumThreads) >>= printResults
-  let failed₁b ← testFiles (root := legacyRoot)
+  let failed₁ ← testFiles (roots := #["EthereumTests/BlockchainTests/", legacyRoot])
                           (directoryBlacklist := #[perfDir])
                           (testBlacklist := DelayFiles)
                           (phase := 1)
-                          (threads := NumThreads)
-                          (clearLog := false) >>= printResults
-  let failed₁ := failed₁a ++ failed₁b
+                          (threads := NumThreads) >>= printResults
 
   IO.println s!"Phase 2/3 - Performance tests only."
-  let failed₂ ← testFiles (root := perfDir)
+  let failed₂ ← testFiles (roots := #[perfDir])
                           (phase := 2)
                           (threads := NumThreads) >>= printResults
 
   IO.println s!"Phase 3/3 - Individually scheduled tests."
-  let failed₃a ← testFiles (root := "EthereumTests/BlockchainTests/")
+  let failed₃ ← testFiles (roots := #["EthereumTests/BlockchainTests/", legacyRoot])
                           (testWhitelist := DelayFiles)
                           (phase := 3)
                           (threads := NumThreads) >>= printResults
-  let failed₃b ← testFiles (root := legacyRoot)
-                          (testWhitelist := DelayFiles)
-                          (phase := 3)
-                          (threads := NumThreads)
-                          (clearLog := false) >>= printResults
-  let failed₃ := failed₃a ++ failed₃b
 
   return if (failed₁ ++ failed₂ ++ failed₃).isEmpty then 0 else 1

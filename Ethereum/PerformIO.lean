@@ -1,3 +1,5 @@
+import Ethereum.PythonHelper
+
 unsafe def unsafePerformIO {τ} [Inhabited τ] (io : IO τ) : τ :=
   match unsafeIO io with
     | Except.ok    a => a
