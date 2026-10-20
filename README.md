@@ -73,14 +73,26 @@ suffix, multi-block absorption, and a proof that every digest contains exactly
 by the executable EVM semantics. Keccak calls reachable from the semantics
 therefore do not cross an FFI boundary.
 
-Several cryptographic precompiles still use external implementations. Their
-Lean wrappers pass successful results through
+The other cryptographic primitives use external implementations:
+
+- SHA-256 and the BLAKE2 compression function `F` are C functions linked
+  through the FFI (`Ethereum/FFI`).
+- ECDSA public-key recovery (`ECRECOVER`, transaction senders and EIP-7702
+  authorities), RIPEMD-160, the alt_bn128 operations (`BN_ADD`, `BN_MUL`,
+  `SNARKV`), the KZG point evaluation (EIP-4844), the BLS12-381 operations
+  (EIP-2537, Prague) and secp256r1 signature verification (EIP-7951, Osaka)
+  are Python helpers in `Ethereum/EllipticCurvesPy`.
+
+The Lean wrappers of the precompiles with a fixed result size pass successful
+results through
 [`Ethereum.checkedPrecompileOutput`](Ethereum/PrecompileOutput.lean), which
-rejects outputs whose size does not match the result size prescribed for that
-precompile. This makes the return-data size proofs independent of assumptions
-about external output lengths. It does not prove that the external
-implementations compute the correct cryptographic values; conformance testing
-remains the behavioral check for those implementations.
+rejects outputs whose size does not match the size prescribed for that
+precompile. The secp256r1 wrapper instead builds its output in Lean: the
+32-byte word `1` for a valid signature and empty output otherwise. This makes
+the return-data size proofs independent of assumptions about external output
+lengths. It does not prove that the external implementations compute the
+correct cryptographic values; conformance testing remains the behavioral check
+for those implementations.
 
 ## Conformance testing
 The model is tested against the blockchain fixtures of

@@ -248,7 +248,11 @@ def main (args : List String) : IO UInt32 := do
       pure <| if wanted ∧ (← root.pathExists) then some root else none
     IO.println s!"EEST fixtures in {fixtures}: {roots.size} directories."
     (← IO.getStdout).flush
-    let failed ← testFiles (roots := roots) (phase := 1) (threads := NumThreads) >>= printResults
+    -- Tests that take minutes, which start first so that they do not finish last.
+    let slowFixtures : Array String :=
+      #["tests/prague/eip2935_historical_block_hashes_from_state/test_block_hashes.py::test_block_hashes_history_at_transition[fork_CancunToPragueAtTime15k-blockchain_test-blocks_before_fork_1-blocks_after_fork_257]"]
+    let failed ← testFiles (roots := roots) (slowTests := slowFixtures)
+                           (phase := 1) (threads := NumThreads) >>= printResults
     return if failed.isEmpty then 0 else 1
 
   IO.println <|

@@ -4,7 +4,7 @@ import Conform.Wheels
 
 def blobP256Verify (data : String) : String :=
   totallySafePerformIO <|
-    runProcessWithInput { cmd := "python3", args := #["Ethereum/EllipticCurvesPy/p256_verify.py"] } data
+    Ethereum.PythonHelper.run "p256_verify.py" #[] data
 
 /--
 EIP-7951 `P256VERIFY` (Osaka). A valid signature yields the 32-byte word `1`;
