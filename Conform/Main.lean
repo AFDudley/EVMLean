@@ -39,12 +39,25 @@ structure WorkUnit where
   cost  : ℕ
 
 /--
+Whether the fixture test `testname` is the test `name`. The `ethereum/tests`
+v17.2 refill also names tests by their filler path, as in
+`BlockchainTests/ValidBlocks/bcExploitTest/SuicideIssue.json::SuicideIssue_Cancun`.
+-/
+def isTest (name testname : String) : Bool :=
+  testname == name || testname.endsWith ("::" ++ name)
+
+/-- Whether `path` lies in the directory `dir`, comparing path components. -/
+def isUnder (dir path : System.FilePath) : Bool :=
+  let parts (p : System.FilePath) := p.components.filter (· ≠ "")
+  (parts dir).isPrefixOf (parts path)
+
+/--
 Split the selected tests of each fixture file into work units. A large file is
 split into up to `threads` units, so that its tests spread over the threads; a
 unit's cost is its share of the file's size.
 -/
-def workUnits (threads : ℕ) (files : Array (System.FilePath × ℕ × Array String)) :
-    IO (Array WorkUnit) := do
+def workUnits (threads : ℕ) (files : Array (System.FilePath × ℕ × Array String))
+    (isFirst : WorkUnit → Bool := fun _ => false) : IO (Array WorkUnit) := do
   let largeFile : ℕ := 4 * 1024 * 1024
   let mut units := #[]
   for (path, total, names) in files do
@@ -56,7 +69,9 @@ def workUnits (threads : ℕ) (files : Array (System.FilePath × ℕ × Array St
       let part := names.extract (k * chunk) ((k + 1) * chunk)
       unless part.isEmpty do
         units := units.push { path, names := part, cost := size * part.size / max total 1 }
-  return units.qsort (·.cost > ·.cost)
+  -- The `isFirst` units go first, then the most expensive ones.
+  return units.qsort fun a b =>
+    if isFirst a != isFirst b then isFirst a else a.cost > b.cost
 
 /--
 Run the work units on `threads` threads. Each thread repeatedly takes the
@@ -92,19 +107,25 @@ def testFiles (roots              : Array System.FilePath)
               (fileBlacklist      : Array System.FilePath := #[])
               (testBlacklist      : Array String := #[])
               (testWhitelist      : Array String := #[])
+              (slowDirectories    : Array System.FilePath := #[])
+              (slowTests          : Array String := #[])
+              (skipSlow           : Bool := false)
               (phase              : ℕ)
               (threads            : ℕ := 1) : IO (Nat × Array String) := do
+  let isSlowTest (testname : String) := slowTests.any (isTest · testname)
   let isToBeTested (testname : String) : Bool :=
     let whitelist := testWhitelist
     let blacklist := testBlacklist ++ Ethereum.Conform.GlobalBlacklist
-    testname ∉ blacklist ∧ (whitelist.isEmpty ∨ testname ∈ whitelist)
+    testname ∉ blacklist ∧ (whitelist.isEmpty ∨ testname ∈ whitelist) ∧
+      ¬(skipSlow ∧ isSlowTest testname)
 
   let mut found := #[]
   for root in roots do
-    found := found ++ Array.filter isTestFile
-      (← System.FilePath.walkDir root (pure <| · ∉ directoryBlacklist))
+    found := found ++ Array.filter isTestFile (← System.FilePath.walkDir root)
 
-  let testFiles := found.filter (· ∉ fileBlacklist)
+  let testFiles := found.filter fun p =>
+    p ∉ fileBlacklist ∧ ¬directoryBlacklist.any (isUnder · p) ∧
+      ¬(skipSlow ∧ slowDirectories.any (isUnder · p))
   let testFiles := testFiles.filter fun p => p.components.all (· != ".meta")
 
   let mut selected : Array (System.FilePath × ℕ × Array String) := #[]
@@ -122,7 +143,9 @@ def testFiles (roots              : Array System.FilePath)
 
   if ←System.FilePath.pathExists (logFile phase) then IO.FS.removeFile (logFile phase)
 
-  let units ← workUnits threads selected
+  -- Slow tests start first, so that they do not finish last.
+  let units ← workUnits threads selected fun u =>
+    slowDirectories.any (isUnder · u.path) ∨ u.names.any isSlowTest
   let scheduled := units.foldl (· + ·.names.size) 0
   IO.println s!"Scheduled {scheduled} tests in {units.size} units on {threads} thread{if threads == 1 then "" else "s"}."
   IO.println s!"Running..."
@@ -156,15 +179,6 @@ def main (args : List String) : IO UInt32 := do
 
   let NumThreads : ℕ := args.head? <&> String.toNat! |>.getD (←nproc)
 
-  let DelayFiles : Array String :=
-    #["static_Call50000bytesContract50_2_d1g0v0_Cancun",
-      "static_Call50000bytesContract50_2_d0g0v0_Cancun",
-      "static_Call50000bytesContract50_3_d1g0v0_Cancun",
-      "static_Call50000_sha256_d0g0v0_Cancun",
-      "static_Call50000_sha256_d1g0v0_Cancun",
-      "CALLBlake2f_MaxRounds_d0g0v0_Cancun",
-      "SuicideIssue_Cancun"]
-
   let printResults (result : ℕ × Array String) : IO (Array String) := do
     let (success, failure) := result
     IO.println s!"Total tests: {success + failure.size}"
@@ -184,23 +198,28 @@ def main (args : List String) : IO UInt32 := do
 
   if ←System.FilePath.pathExists liveFailureLog then IO.FS.removeFile liveFailureLog
 
-  IO.println s!"Phase 1/3 - No performance tests."
+  /-
+    The performance tests take from a minute to several minutes each: the
+    `vmPerformance` directory and a few others. They run by default, first.
+    `CONFORM_SKIP_PERF=1` leaves them out.
+  -/
+  let perfTests : Array String :=
+    #["static_Call50000bytesContract50_2_d1g0v0_Cancun",
+      "static_Call50000bytesContract50_2_d0g0v0_Cancun",
+      "static_Call50000bytesContract50_3_d1g0v0_Cancun",
+      "static_Call50000_sha256_d0g0v0_Cancun",
+      "static_Call50000_sha256_d1g0v0_Cancun",
+      "CALLBlake2f_MaxRounds_d0g0v0_Cancun"]
+  let skipPerf := (← IO.getEnv "CONFORM_SKIP_PERF").isSome
+  IO.println <|
+    if skipPerf then "Conformance tests, without the performance tests."
+    else "Conformance tests, including the performance tests."
   (← IO.getStdout).flush
-  let failed₁ ← testFiles (roots := #["EthereumTests/BlockchainTests/", legacyRoot])
-                          (directoryBlacklist := #[perfDir])
-                          (testBlacklist := DelayFiles)
-                          (phase := 1)
-                          (threads := NumThreads) >>= printResults
+  let failed ← testFiles (roots := #["EthereumTests/BlockchainTests/", legacyRoot])
+                         (slowDirectories := #[perfDir])
+                         (slowTests := perfTests)
+                         (skipSlow := skipPerf)
+                         (phase := 1)
+                         (threads := NumThreads) >>= printResults
 
-  IO.println s!"Phase 2/3 - Performance tests only."
-  let failed₂ ← testFiles (roots := #[perfDir])
-                          (phase := 2)
-                          (threads := NumThreads) >>= printResults
-
-  IO.println s!"Phase 3/3 - Individually scheduled tests."
-  let failed₃ ← testFiles (roots := #["EthereumTests/BlockchainTests/", legacyRoot])
-                          (testWhitelist := DelayFiles)
-                          (phase := 3)
-                          (threads := NumThreads) >>= printResults
-
-  return if (failed₁ ++ failed₂ ++ failed₃).isEmpty then 0 else 1
+  return if failed.isEmpty then 0 else 1

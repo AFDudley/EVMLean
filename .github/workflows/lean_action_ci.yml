@@ -31,3 +31,12 @@ jobs:
 
       - name: Check Keccak-256 vectors
         run: lake build Ethereum.SpongeHash.Keccak256Tests
+
+      - name: Run conformance tests (without the performance tests)
+        env:
+          CONFORM_SKIP_PERF: "1"
+        run: lake test -- "$(nproc)" 2> conformance-stderr.txt
+
+      - name: Show failing conformance tests
+        if: failure()
+        run: cat failures_live.txt || true
