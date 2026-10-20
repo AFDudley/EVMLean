@@ -86,10 +86,6 @@ the performance tests first and then the most expensive files. Set
 `timings_1.txt`, and `CONFORM_PROGRESS=<file>` to log each test as it starts
 and finishes.
 
-The Python helpers in `Ethereum/EllipticCurvesPy` are run by long-lived
-processes (`Ethereum/PythonHelper.lean` and `helper_server.py`) rather than
-one process per call, which used to dominate the cost of a test.
-
 # License
 
 This repository is based on Nethermind's [EVMYulLean](https://github.com/NethermindEth/EVMYulLean), which is licensed under the Apache License, Version 2.0. This modified copy is distributed under the Apache License, Version 2.0; see [LICENSE](LICENSE).
