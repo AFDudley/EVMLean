@@ -8,21 +8,13 @@ import Ethereum.SpongeHash.Keccak256
 def secp256k1n : ℕ := 115792089237316195423570985008687907852837564279074904382605163141518161494337
 
 def blobECDSARECOVER (e v r s : String) : String :=
-  totallySafePerformIO ∘ IO.Process.run <|
-    pythonCommandOfInput e v r s
-  where pythonCommandOfInput (e v r s : String) : IO.Process.SpawnArgs := {
-    cmd := "python3",
-    args := #["Ethereum/EllipticCurvesPy/recover.py", e, v, r, s]
-  }
+  totallySafePerformIO <|
+    Ethereum.PythonHelper.run "recover.py" #[e, v, r, s]
 
 def blobSign (e pᵣ : String) : List String :=
-  let output := totallySafePerformIO <| IO.Process.run <| pythonCommandOfInput e pᵣ
+  let output := totallySafePerformIO <| Ethereum.PythonHelper.run "sign.py" #[e, pᵣ]
   let chunks : List String.Slice := (output.split Char.isWhitespace).toList
   chunks.map String.Slice.toString
-  where pythonCommandOfInput (e pᵣ : String) : IO.Process.SpawnArgs := {
-    cmd := "python3",
-    args := #["Ethereum/EllipticCurvesPy/sign.py", e, pᵣ]
-  }
 
 -- Appendix F. Signing Transactions
 

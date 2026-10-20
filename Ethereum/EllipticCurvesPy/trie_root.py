@@ -5,8 +5,9 @@ from typing import (
     Optional,
 )
 
+# The entries are read from the file `sys.argv[1]`, or from stdin when it is `-`.
 fileName : Bytes = sys.argv[1]
-file = open(fileName, "r")
+file = sys.stdin if fileName == "-" else open(fileName, "r")
 n = int(sys.argv[2])
 
 trie: Trie[Bytes, Optional[Bytes]] = Trie(

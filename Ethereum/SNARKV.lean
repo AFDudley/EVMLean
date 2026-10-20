@@ -4,12 +4,8 @@ import Ethereum.PrecompileOutput
 import Conform.Wheels
 
 def blobSNARKV (data : String) : String :=
-  totallySafePerformIO ∘ IO.Process.run <|
-    pythonCommandOfInput data
-  where pythonCommandOfInput (data : String) : IO.Process.SpawnArgs := {
-    cmd := "python3",
-    args := #["Ethereum/EllipticCurvesPy/snarkv.py", data]
-  }
+  totallySafePerformIO <|
+    Ethereum.PythonHelper.run "snarkv.py" #[] data
 
 def SNARKV (data : ByteArray) : Except String ByteArray :=
   Ethereum.checkedPrecompileOutput "SNARKV" 32 <| match blobSNARKV (toHex data) with

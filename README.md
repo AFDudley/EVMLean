@@ -77,6 +77,15 @@ lake test -- <NUM_THREADS> 2> out_discard.txt
 where `<NUM_THREADS>` is the number of threads running conformance tests in parallel. Note that the default is `1`.
 We recommend redirecting `stderr` into a file to not pollute the output.
 
+The run includes the performance tests (`vmPerformance`), a few of which take
+minutes; set `CONFORM_SKIP_PERF=1` to leave them out, as CI does.
+
+The threads take fixture files, or slices of large ones, from a shared queue,
+the performance tests first and then the most expensive files. Set
+`CONFORM_TIMED=1` to write the running time of every test, slowest first, to
+`timings_1.txt`, and `CONFORM_PROGRESS=<file>` to log each test as it starts
+and finishes.
+
 # License
 
 This repository is based on Nethermind's [EVMYulLean](https://github.com/NethermindEth/EVMYulLean), which is licensed under the Apache License, Version 2.0. This modified copy is distributed under the Apache License, Version 2.0; see [LICENSE](LICENSE).

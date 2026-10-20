@@ -4,12 +4,8 @@ import Ethereum.PrecompileOutput
 import Conform.Wheels
 
 def blobPointEval (data : String) : String :=
-  totallySafePerformIO ∘ IO.Process.run <|
-    pythonCommandOfInput data
-  where pythonCommandOfInput (data : String) : IO.Process.SpawnArgs := {
-    cmd := "python3",
-    args := #["Ethereum/EllipticCurvesPy/point_evaluation.py", data]
-  }
+  totallySafePerformIO <|
+    Ethereum.PythonHelper.run "point_evaluation.py" #[data]
 
 def PointEval (data : ByteArray) : Except String ByteArray :=
   Ethereum.checkedPrecompileOutput "PointEval" 64 <| match blobPointEval (toHex data) with
