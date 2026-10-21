@@ -114,6 +114,53 @@ lemma precompile_P256VERIFY_accountMap_empty_or_self
     · exact Or.inr rfl
     · exact Or.inl rfl
 
+/--
+A BLS12-381 precompile (EIP-2537) called with no gas fails: a valid input
+always costs gas (`blsRequiredGas_pos_of_valid`), and an invalid input length
+is rejected in Lean before the external implementation runs.
+-/
+theorem precompile_BLS12_381_zero_gas
+    (op : ℕ) (σ : AccountMap) (A : Substate) (I : ExecutionEnv) :
+    Ξ_BLS12_381 op σ ⟨0⟩ A I = (∅, ⟨0⟩, A, .empty) := by
+  unfold Ξ_BLS12_381
+  by_cases hpos : 0 < blsRequiredGas op I.calldata.size
+  · have hlt : (⟨0⟩ : UInt256).toNat < blsRequiredGas op I.calldata.size := hpos
+    rw [if_pos hlt]
+  · have hlt : ¬(⟨0⟩ : UInt256).toNat < blsRequiredGas op I.calldata.size := hpos
+    rw [if_neg hlt]
+    have hvalid : blsInputLengthValid op I.calldata.size = false := by
+      cases h : blsInputLengthValid op I.calldata.size
+      · rfl
+      · exact absurd (blsRequiredGas_pos_of_valid h) hpos
+    have hbls : BLS12_381 op (blsOutputSize op) I.calldata =
+        .error "BLS12-381: invalid input length" := by
+      unfold BLS12_381
+      simp [hvalid]
+    rw [hbls]
+
+/-- The precompile dispatch at a BLS12-381 address (`0x0b`–`0x11`) fails
+    when called with no gas. -/
+theorem precompile_dispatch_BLS12_381_zero_gas {p : AccountAddress}
+    (hp : 11 ≤ p.val ∧ p.val ≤ 17) (σ : AccountMap) (A : Substate) (I : ExecutionEnv) :
+    Ξ_PRECOMPILE p σ ⟨0⟩ A I = (∅, ⟨0⟩, A, .empty) := by
+  have hcases : p.val = 11 ∨ p.val = 12 ∨ p.val = 13 ∨ p.val = 14 ∨
+      p.val = 15 ∨ p.val = 16 ∨ p.val = 17 := by omega
+  rcases hcases with h | h | h | h | h | h | h
+  · obtain rfl : p = (11 : AccountAddress) := Fin.ext (h.trans (by decide))
+    simp [Ξ_PRECOMPILE, precompile_BLS12_381_zero_gas]
+  · obtain rfl : p = (12 : AccountAddress) := Fin.ext (h.trans (by decide))
+    simp [Ξ_PRECOMPILE, precompile_BLS12_381_zero_gas]
+  · obtain rfl : p = (13 : AccountAddress) := Fin.ext (h.trans (by decide))
+    simp [Ξ_PRECOMPILE, precompile_BLS12_381_zero_gas]
+  · obtain rfl : p = (14 : AccountAddress) := Fin.ext (h.trans (by decide))
+    simp [Ξ_PRECOMPILE, precompile_BLS12_381_zero_gas]
+  · obtain rfl : p = (15 : AccountAddress) := Fin.ext (h.trans (by decide))
+    simp [Ξ_PRECOMPILE, precompile_BLS12_381_zero_gas]
+  · obtain rfl : p = (16 : AccountAddress) := Fin.ext (h.trans (by decide))
+    simp [Ξ_PRECOMPILE, precompile_BLS12_381_zero_gas]
+  · obtain rfl : p = (17 : AccountAddress) := Fin.ext (h.trans (by decide))
+    simp [Ξ_PRECOMPILE, precompile_BLS12_381_zero_gas]
+
 /-- A precompile either fails, with an empty account map, or keeps the state. -/
 theorem precompiled_result_accountMap_empty_or_self
     (pc : AccountAddress) (σ : AccountMap) (g : UInt256) (A : Substate) (I : ExecutionEnv) :

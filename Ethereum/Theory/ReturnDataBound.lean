@@ -3158,7 +3158,7 @@ lemma precompile_BLS12_381_output_size_le_maxReturnDataSizeByGas_or_calldata
   · simp only [hgas, if_false]
     cases hres : BLS12_381 op (blsOutputSize op) I.calldata with
     | ok out =>
-      have hs := checkedPrecompileOutput_ok_size hres
+      have hs := BLS12_381_ok_size hres
       have hle : blsOutputSize op ≤ 256 := by
         unfold blsOutputSize; split <;> omega
       exact le_max_of_le_left (by simp only; omega)

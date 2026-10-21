@@ -459,6 +459,46 @@ def blsRequiredGas (operation inputSize : ℕ) : ℕ :=
   | 17 => 23800
   | _ => 0
 
+private theorem blsDiscount_ge (discounts : Array ℕ) (m : ℕ)
+    (hall : ∀ x ∈ discounts.toList, m ≤ x) (hlast : m ≤ discounts[127]?.getD 0)
+    {k : ℕ} (hk : 1 ≤ k) : m ≤ blsDiscount discounts k := by
+  unfold blsDiscount
+  rw [if_neg (by omega)]
+  cases h : discounts[k - 1]? with
+  | none => simpa using hlast
+  | some x => exact hall x (Array.mem_def.mp (Array.mem_of_getElem? h))
+
+set_option maxRecDepth 65536 in
+/-- Every valid EIP-2537 input costs gas. -/
+theorem blsRequiredGas_pos_of_valid {operation size : ℕ}
+    (h : blsInputLengthValid operation size = true) : 0 < blsRequiredGas operation size := by
+  unfold blsInputLengthValid at h
+  split at h
+  · simp [blsRequiredGas]
+  · -- G1MSM
+    simp only [Bool.and_eq_true, bne_iff_ne, ne_eq, beq_iff_eq] at h
+    have hk : 1 ≤ size / 160 := by omega
+    have hd : 519 ≤ blsDiscount blsG1Discounts (size / 160) :=
+      blsDiscount_ge _ _ (by decide) (by decide) hk
+    have hm : 1 * 12000 * 519 ≤ size / 160 * 12000 * blsDiscount blsG1Discounts (size / 160) :=
+      Nat.mul_le_mul (Nat.mul_le_mul_right _ hk) hd
+    simp only [blsRequiredGas]
+    exact Nat.div_pos (by omega) (by norm_num)
+  · simp [blsRequiredGas]
+  · -- G2MSM
+    simp only [Bool.and_eq_true, bne_iff_ne, ne_eq, beq_iff_eq] at h
+    have hk : 1 ≤ size / 288 := by omega
+    have hd : 524 ≤ blsDiscount blsG2Discounts (size / 288) :=
+      blsDiscount_ge _ _ (by decide) (by decide) hk
+    have hm : 1 * 22500 * 524 ≤ size / 288 * 22500 * blsDiscount blsG2Discounts (size / 288) :=
+      Nat.mul_le_mul (Nat.mul_le_mul_right _ hk) hd
+    simp only [blsRequiredGas]
+    exact Nat.div_pos (by omega) (by norm_num)
+  · simp [blsRequiredGas]
+  · simp [blsRequiredGas]
+  · simp [blsRequiredGas]
+  · simp at h
+
 /-- Output size of the EIP-2537 precompile at address `operation`. -/
 def blsOutputSize (operation : ℕ) : ℕ :=
   match operation with
