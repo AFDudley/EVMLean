@@ -285,7 +285,9 @@ def create
   decreasing_by
     apply Prod.Lex.left
     have hDepth_lt : evmState.executionEnv.depth.val < 1024 := by
-      simpa [Iₑ, I] using hDepth.2.1
+      have h := hDepth.2.1
+      simp only [Iₑ, I] at h
+      omega
     change 1024 - (evmState.executionEnv.depth.val + 1) < 1024 - evmState.executionEnv.depth.val
     exact Nat.sub_lt_sub_left hDepth_lt (Nat.lt_succ_self _)
 
@@ -1037,7 +1039,7 @@ def Θ (σ  : AccountMap)
   let (σ'', g', A'', out) :=
     match c with
       | ToExecute.Precompiled p =>
-        match p with
+        match p.val with
           | 1  => Ξ_ECREC σ₁ g A I
           | 2  => Ξ_SHA256 σ₁ g A I
           | 3  => Ξ_RIP160 σ₁ g A I
@@ -1079,7 +1081,7 @@ def Θ (σ  : AccountMap)
 
 end
 
-open Batteries (RBMap RBSet)
+open RBTree (RBMap RBSet)
 
 
 -- Type Υ using \Upsilon or \GU
@@ -1128,7 +1130,7 @@ def Υ
   let a := -- (80)
     A0.accessedAccounts.insert S_T
       |>.insert H.beneficiary
-      |>.union <| Batteries.RBSet.ofList (accessList.map Prod.fst) compare
+      |>.union <| RBTree.RBSet.ofList (accessList.map Prod.fst) compare
   -- (81)
   let g := .ofNat <| T.base.gasLimit.toNat - g₀
   let AStarₐ := -- (79)
@@ -1136,7 +1138,7 @@ def Υ
       | some t => a.insert t
       | none => a
   let AStar := -- (77)
-    { A0 with accessedAccounts := AStarₐ, accessedStorageKeys := Batteries.RBSet.ofList AStar_K Substate.storageKeysCmp}
+    { A0 with accessedAccounts := AStarₐ, accessedStorageKeys := RBTree.RBSet.ofList AStar_K Substate.storageKeysCmp}
   let (/- provisional state -/ σ_P, g', A, z) ← -- (76)
     match T.base.recipient with
       | none => do

@@ -8,7 +8,7 @@ import Ethereum.State.Substate
 
 namespace Ethereum
 
-open Batteries (RBMap RBSet)
+open RBTree (RBMap RBSet)
 
 -- "All transaction types specify a number of common fields:"
 /--

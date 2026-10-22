@@ -226,106 +226,97 @@ def account_dead (σ : AccountMap) (a : AccountAddress) : Prop :=
   | none => True
   | some acc => acc.nonce = ⟨0⟩ ∧ acc.code.size = 0 ∧ (acc.storage == default) = true
 
+/-- Self-subtraction of a 256-bit word is zero. (A v4.33 tactic no longer closes this
+    implicitly; the lemma keeps the state-equality proofs explicit.) -/
+private lemma uint256_sub_self (a : UInt256) : a - a = { val := 0 } := by
+  show (⟨a.val - a.val⟩ : UInt256) = ⟨0⟩
+  congr 1
+  exact sub_self a.val
+
 inductive account_change_consistent (acc : AccountAddress) : AccountMap → AccountMap → Prop where
-  | unchanged {σ σ'}:
-    unchanged acc σ σ'
-    → account_change_consistent acc σ σ'
+  | unchanged {sb sa : AccountMap} :
+    unchanged acc sb sa
+    → account_change_consistent acc sb sa
 
-  | init_dead {σ σ'}:
-    account_dead σ acc
-    → account_change_consistent acc σ σ'
+  | init_dead {sb sa : AccountMap} :
+    account_dead sb acc
+    → account_change_consistent acc sb sa
 
-  | call_prelude {σ r s v z}:
-    account_change_consistent acc σ (sendEth r s v z σ)
+  | call_prelude {sb : AccountMap} {rcp src : AccountAddress} {vl : UInt256} {suc : Bool} :
+    account_change_consistent acc sb (sendEth rcp src vl suc sb)
 
-  | create_prelude {σ a s v z}:
-    account_change_consistent acc σ (sendEthCreate a s v z σ)
+  | create_prelude {sb : AccountMap} {adr src : AccountAddress} {vl : UInt256} {suc : Bool} :
+    account_change_consistent acc sb (sendEthCreate adr src vl suc sb)
 
-  | by_own_code
-    {σ σ₀ σ' : AccountMap}
-    {A A' : Substate}
-    {s o : AccountAddress}
-    {g g' p v v' : UInt256}
-    {d o' : ByteArray}
-    {e : Fin 1025}
-    {H : BlockHeader}
-    {blobVersionedHashes : List ByteArray}
-    {blocks : ProcessedBlocks}
-    {w z : Bool} :
-    Θ σ σ₀ A s o acc (toExecute σ acc) g p v v' d e H blobVersionedHashes blocks w = (σ', g', A', z, o')
-    → account_change_consistent acc (sendEth acc s v z σ) σ'
+  | by_own_code {sb s0 sa : AccountMap} {subA subB : Substate} {src org : AccountAddress}
+      {gas gasA prc vl vlA : UInt256} {dat rout : ByteArray} {dpt : Fin 1025} {hdr : BlockHeader}
+      {bvh : List ByteArray} {blks : ProcessedBlocks} {prm suc : Bool} :
+    Θ sb s0 subA src org acc (toExecute sb acc) gas prc vl vlA dat dpt hdr bvh blks prm
+        = (sa, gasA, subB, suc, rout)
+    → account_change_consistent acc (sendEth acc src vl suc sb) sa
 
-  | by_own_code_from_start
-    {σ σ₀ σ' : AccountMap}
-    {A A' : Substate}
-    {s o : AccountAddress}
-    {g g' p v v' : UInt256}
-    {d o' : ByteArray}
-    {e : Fin 1025}
-    {H : BlockHeader}
-    {blobVersionedHashes : List ByteArray}
-    {blocks : ProcessedBlocks}
-    {w z : Bool} :
-    Θ σ σ₀ A s o acc
-        (toExecute σ acc) g p v v' d e H blobVersionedHashes blocks w =
-      (σ', g', A', z, o')
-    → account_change_consistent acc σ σ'
+  | by_own_code_from_start {sb s0 sa : AccountMap} {subA subB : Substate} {src org : AccountAddress}
+      {gas gasA prc vl vlA : UInt256} {dat rout : ByteArray} {dpt : Fin 1025} {hdr : BlockHeader}
+      {bvh : List ByteArray} {blks : ProcessedBlocks} {prm suc : Bool} :
+    Θ sb s0 subA src org acc (toExecute sb acc) gas prc vl vlA dat dpt hdr bvh blks prm
+        = (sa, gasA, subB, suc, rout)
+    → account_change_consistent acc sb sa
 
 def account_changes_consistent (acc : AccountAddress) :=
   Relation.ReflTransGen (account_change_consistent acc)
 
 private lemma rbNode_consume_self_stream {α} [BEq α] [ReflBEq α] :
-    ∀ (xs : List α) (s : Batteries.RBNode.Stream α),
+    ∀ (xs : List α) (s : RBTree.RBNode.Stream α),
       s.toList = xs →
       (match StateT.run (s := s)
-          (xs.forM (m := StateT (Batteries.RBNode.Stream α) Option) fun a s => do
-            let (b, s) ← Batteries.RBNode.Stream.next? s
+          (xs.forM (m := StateT (RBTree.RBNode.Stream α) Option) fun a s => do
+            let (b, s) ← RBTree.RBNode.Stream.next? s
             bif a == b then some (PUnit.unit, s) else none) with
-       | some (_, Batteries.RBNode.Stream.nil) => true
+       | some (_, RBTree.RBNode.Stream.nil) => true
        | _ => false) = true := by
   intro xs
   induction xs with
   | nil =>
       intro s h
-      cases s <;> simp [Batteries.RBNode.Stream.toList] at h ⊢
+      cases s <;> simp [RBTree.RBNode.Stream.toList] at h ⊢
   | cons x xs ih =>
       intro s h
       cases s with
-      | nil => simp [Batteries.RBNode.Stream.toList] at h
+      | nil => simp [RBTree.RBNode.Stream.toList] at h
       | cons v r tail =>
-          simp [Batteries.RBNode.Stream.toList, Batteries.RBNode.Stream.next?] at h ⊢
+          simp [RBTree.RBNode.Stream.toList, RBTree.RBNode.Stream.next?] at h ⊢
           rcases h with ⟨hv, htail⟩
           subst v
-          have htailStream : (Batteries.RBNode.toStream r tail).toList = xs := by
-            rw [Batteries.RBNode.toStream_toList']
-            simpa [Batteries.RBNode.foldr_cons, Batteries.RBNode.Stream.toList] using htail
+          have htailStream : (RBTree.RBNode.toStream r tail).toList = xs := by
+            rw [RBTree.RBNode.toStream_toList']
+            simpa [RBTree.RBNode.foldr_cons, RBTree.RBNode.Stream.toList] using htail
           simp only [StateT.run, BEq.rfl, cond_true, Option.bind_some]
-          exact ih (Batteries.RBNode.toStream r tail) htailStream
+          exact ih (RBTree.RBNode.toStream r tail) htailStream
 
-private lemma rbNode_all₂_self {α} [BEq α] [ReflBEq α] (t : Batteries.RBNode α) :
+private lemma rbNode_all₂_self {α} [BEq α] [ReflBEq α] (t : RBTree.RBNode α) :
     t.all₂ (· == ·) t = true := by
-  unfold Batteries.RBNode.all₂
-  rw [Batteries.RBNode.forM_eq_forM_toList]
+  unfold RBTree.RBNode.all₂
+  rw [RBTree.RBNode.forM_eq_forM_toList]
   exact rbNode_consume_self_stream t.toList t.toStream (by simp)
 
 private lemma rbSet_all₂_self {α} {cmp : α → α → Ordering} [BEq α] [ReflBEq α]
-    (t : Batteries.RBSet α cmp) : t.all₂ (· == ·) t = true := by
+    (t : RBTree.RBSet α cmp) : t.all₂ (· == ·) t = true := by
   exact rbNode_all₂_self t.1
 
 instance {α} {cmp : α → α → Ordering} [BEq α] [ReflBEq α] :
-    ReflBEq (Batteries.RBSet α cmp) where
+    ReflBEq (RBTree.RBSet α cmp) where
   rfl := by
     intro a
     exact rbSet_all₂_self a
 
 instance instRBMapReflBEq{α β} {cmp : α → α → Ordering} [BEq α] [BEq β] [ReflBEq α] [ReflBEq β] :
-    ReflBEq (Batteries.RBMap α β cmp) where
+    ReflBEq (RBTree.RBMap α β cmp) where
   rfl := by
     intro a
     exact rbSet_all₂_self a
 
 @[simp] lemma rbMap_empty_beq_empty {α β} {cmp : α → α → Ordering} [BEq α] [BEq β] :
-    ((∅ : Batteries.RBMap α β cmp) == ∅) = true := by
+    ((∅ : RBTree.RBMap α β cmp) == ∅) = true := by
   rfl
 
 lemma addr_neq_compare : ∀ (a b : AccountAddress), a ≠ b → ¬ compare a b = Ordering.eq := by
@@ -450,7 +441,7 @@ private lemma sendEth_true_get?_some_get?_some_ne
 private lemma depth_succ_measure {e : Fin 1025} {n : Nat}
     (hdepth : 1024 - e.val = n + 1) (hlt : e < 1024) :
     1024 - (e + 1).val = n := by
-  have hltVal : e.val < 1024 := by simpa using hlt
+  have hltVal : e.val < 1024 := by simpa [Fin.lt_def] using hlt
   have hval : (e + 1).val = e.val + 1 := by
     rw [Fin.val_add_eq_of_add_lt]
     simp
@@ -1268,7 +1259,8 @@ private lemma step_system_consistent_except_owner_max_depth
                     rw [sendEth_true_get?_some_get?_some_ne
                       target state.executionEnv.codeOwner ownerAcc.balance state.accountMap
                       targetAcc ownerAcc htarget howner hsame] at hpre
-                    simpa using hpre
+                    rw [uint256_sub_self] at hpre
+                    exact hpre
         · cases howner : state.accountMap.get? state.executionEnv.codeOwner with
           | none =>
               simp [hpop, hcreated, howner] at h
@@ -1309,7 +1301,8 @@ private lemma step_system_consistent_except_owner_max_depth
                     rw [sendEth_true_get?_some_get?_some_ne
                       target state.executionEnv.codeOwner ownerAcc.balance state.accountMap
                       targetAcc ownerAcc htarget howner hsame] at hpre
-                    simpa using hpre
+                    rw [uint256_sub_self] at hpre
+                    exact hpre
 
 set_option maxHeartbeats 1000000 in
 private lemma step_system_consistent_except_owner_succ_depth
@@ -1507,7 +1500,8 @@ private lemma step_system_consistent_except_owner_succ_depth
                     rw [sendEth_true_get?_some_get?_some_ne
                       target state.executionEnv.codeOwner ownerAcc.balance state.accountMap
                       targetAcc ownerAcc htarget howner hsame] at hpre
-                    simpa using hpre
+                    rw [uint256_sub_self] at hpre
+                    exact hpre
         · cases howner : state.accountMap.get? state.executionEnv.codeOwner with
           | none =>
               simp [hpop, hcreated, howner] at h
@@ -1548,7 +1542,8 @@ private lemma step_system_consistent_except_owner_succ_depth
                     rw [sendEth_true_get?_some_get?_some_ne
                       target state.executionEnv.codeOwner ownerAcc.balance state.accountMap
                       targetAcc ownerAcc htarget howner hsame] at hpre
-                    simpa using hpre
+                    rw [uint256_sub_self] at hpre
+                    exact hpre
 
 theorem account_changes_consistent_of_Z
     {op : Operation}
@@ -2356,7 +2351,7 @@ private lemma precompiled_Theta_accountMap_eq
           code := default, gasPrice := p.toNat, header := H, depth := e, perm := w,
           blobVersionedHashes := blobVersionedHashes, blocks := blocks }
        let result : AccountMap × UInt256 × Substate × ByteArray :=
-        match pc with
+        match pc.val with
         | 1 => Ξ_ECREC σ₁ g A I
         | 2 => Ξ_SHA256 σ₁ g A I
         | 3 => Ξ_RIP160 σ₁ g A I
@@ -2376,7 +2371,7 @@ private lemma precompiled_Theta_accountMap_eq
 private lemma precompiled_result_accountMap_empty_or_self
     (pc : AccountAddress) (σ : AccountMap) (g : UInt256) (A : Substate) (I : ExecutionEnv) :
     (let result : AccountMap × UInt256 × Substate × ByteArray :=
-      match pc with
+      match pc.val with
       | 1 => Ξ_ECREC σ g A I
       | 2 => Ξ_SHA256 σ g A I
       | 3 => Ξ_RIP160 σ g A I
@@ -2390,7 +2385,7 @@ private lemma precompiled_result_accountMap_empty_or_self
       | _ => default
      result.1) = ∅ ∨
     (let result : AccountMap × UInt256 × Substate × ByteArray :=
-      match pc with
+      match pc.val with
       | 1 => Ξ_ECREC σ g A I
       | 2 => Ξ_SHA256 σ g A I
       | 3 => Ξ_RIP160 σ g A I
@@ -2555,7 +2550,8 @@ theorem account_changes_consistent_except_owner_of_Theta_and_Lambda :
                   · simp
                 apply account_changes_consistent_trans
                 · exact account_changes_consistent_sendEth_prelude acc r s v true σ
-                · simpa [sendEth] using hXiAcc
+                · simp only [sendEth, if_true, ne_eq, bne_iff_ne, ite_not]
+                  exact hXiAcc
       · intro hLambda acc
         by_cases hacc_ne_a : acc ≠ a
         ·
@@ -2654,9 +2650,10 @@ theorem account_changes_consistent_except_owner_of_Theta_and_Lambda :
                             (out := returnedData)
                             (by
                               dsimp [σStarCollision]
-                              simpa [Std.ExtTreeMap.getD_eq_getD_getElem?,
+                              simp [Std.ExtTreeMap.getD_eq_getD_getElem?,
                                 ← Std.ExtTreeMap.get?_eq_getElem?, ha, hfind, hfinal.1.1, hfinal.1.2,
-                                hstorage_bne, hstorage_ne_default] using hXi))
+                                hstorage_bne, hstorage_ne_default] at hXi ⊢
+                              exact hXi))
   | succ n' ih =>
       constructor
       · intro hTheta acc hacc_ne_r
@@ -2713,7 +2710,8 @@ theorem account_changes_consistent_except_owner_of_Theta_and_Lambda :
                       hLambdaᵢ acc
                 apply account_changes_consistent_trans
                 · exact account_changes_consistent_sendEth_prelude acc r s v true σ
-                · simpa [sendEth] using hXiAcc
+                · simp only [sendEth, if_true, ne_eq, bne_iff_ne, ite_not]
+                  exact hXiAcc
       · intro hLambda acc
         by_cases hacc_ne_a : acc ≠ a
         · unfold Lambda at hLambda
@@ -2828,9 +2826,10 @@ theorem account_changes_consistent_except_owner_of_Theta_and_Lambda :
                             (out := returnedData)
                             (by
                               dsimp [σStarCollision]
-                              simpa [Std.ExtTreeMap.getD_eq_getD_getElem?,
+                              simp [Std.ExtTreeMap.getD_eq_getD_getElem?,
                                 ← Std.ExtTreeMap.get?_eq_getElem?, ha, hfind, hfinal.1.1, hfinal.1.2,
-                                hstorage_bne, hstorage_ne_default] using hXi))
+                                hstorage_bne, hstorage_ne_default] at hXi ⊢
+                              exact hXi))
 
 theorem account_changes_consistent_of_Theta :
     ∀ σ' g' A' z o' e,

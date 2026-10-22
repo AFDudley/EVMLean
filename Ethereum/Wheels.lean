@@ -50,7 +50,7 @@ def UInt256.toByteArrayWithSizeProof (val : UInt256) : { b : ByteArray // b.size
       rw [ByteArray_zeroes_size]
       have hb : b.size ≤ 32 := by
         have ha : (val.toNat : ℕ) < 2 ^ (8 * 32) := by
-          simp [UInt256.size, UInt256.toNat]
+          simpa [UInt256.size, UInt256.toNat] using val.val.isLt
         simpa [b, BE] using toBytesBigEndian_le (k := 32) ha
       omega
       ⟩
@@ -78,9 +78,13 @@ instance {n : Nat} : OfNat AccountAddress n := ⟨Fin.ofNat _ n⟩
 
 lemma ofUInt256_ofNat (a : AccountAddress) :
     AccountAddress.ofUInt256 (UInt256.ofNat a.val) = a := by
+  have h : (a : ℕ) < 1461501637330902918203684832716283019655932542976 := a.isLt
   ext
   unfold AccountAddress.ofUInt256 UInt256.ofNat
-  simp [Id.run, AccountAddress.size, UInt256.size]
+  simp only [Id.run]
+  rw [Fin.val_ofNat, Fin.val_ofNat]
+  simp only [UInt256.size, AccountAddress.size]
+  omega
 
 def toByteArray (a : AccountAddress) : ByteArray :=
   let b := BE a
@@ -96,7 +100,7 @@ def toByteArrayWithSizeProof (a : AccountAddress) : { b : ByteArray // b.size = 
       rw [ByteArray_zeroes_size]
       have hb : b.size ≤ 20 := by
         have ha : (a : ℕ) < 2 ^ (8 * 20) := by
-          simp [AccountAddress.size]
+          simpa [AccountAddress.size] using a.isLt
         simpa [b, BE] using toBytesBigEndian_le (k := 20) ha
       omega
       ⟩

@@ -5309,7 +5309,7 @@ theorem step_selfdestruct : ∀ (s : State),
                 gasCost, sdState, Iₐ, r]
               cases hcreated : s.substate.createdAccounts.contains s.executionEnv.codeOwner
               · have hcreated_mem : ¬ s.executionEnv.codeOwner ∈ s.substate.createdAccounts := by
-                  rw [← Batteries.RBSet.contains_iff]
+                  rw [← RBTree.RBSet.contains_iff]
                   simp [hcreated]
                 cases hself :
                     Std.ExtTreeMap.get? s.accountMap s.executionEnv.codeOwner with
@@ -5333,7 +5333,7 @@ theorem step_selfdestruct : ∀ (s : State),
                     · simp [hcreated, hcreated_mem, hneq, sdState, Iₐ, r, hgas0,
                         chargedState, Cselfdestruct, hstack, Sat256.subNat_zero, UInt256_subzero', UInt256_ofNat_1]
               · have hcreated_mem : s.executionEnv.codeOwner ∈ s.substate.createdAccounts := by
-                  rw [← Batteries.RBSet.contains_iff]
+                  rw [← RBTree.RBSet.contains_iff]
                   simp [hcreated]
                 cases hself :
                     Std.ExtTreeMap.get? s.accountMap s.executionEnv.codeOwner with

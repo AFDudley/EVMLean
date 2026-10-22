@@ -2525,7 +2525,7 @@ lemma lambda_projection_output_size_le_maxReturnDataSizeByGas
   let a : AccountAddress := (KEC lₐ).extract 12 32 |> fromByteArrayBigEndian |> Fin.ofNat _
   let AStar := A.addAccessedAccount a
   let existentAccount := σ.getD a default
-  let collision : ByteArray × Batteries.RBSet AccountAddress compare :=
+  let collision : ByteArray × RBTree.RBSet AccountAddress compare :=
     if existentAccount.nonce ≠ ⟨0⟩ || existentAccount.code.size ≠ 0 ||
         existentAccount.storage != default then
       (⟨#[0xfe]⟩, A.createdAccounts)

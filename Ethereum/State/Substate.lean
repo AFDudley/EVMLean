@@ -48,13 +48,13 @@ The `Substate` `A`. Section 6.1.
 - `createdAccounts`    addresses created during this transaction
 -/
 structure Substate where
-  selfDestructSet     : Batteries.RBSet AccountAddress compare
-  touchedAccounts     : Batteries.RBSet AccountAddress compare
+  selfDestructSet     : RBTree.RBSet AccountAddress compare
+  touchedAccounts     : RBTree.RBSet AccountAddress compare
   refundBalance       : UInt256
-  accessedAccounts    : Batteries.RBSet AccountAddress compare
-  accessedStorageKeys : Batteries.RBSet (AccountAddress × UInt256) Substate.storageKeysCmp
+  accessedAccounts    : RBTree.RBSet AccountAddress compare
+  accessedStorageKeys : RBTree.RBSet (AccountAddress × UInt256) Substate.storageKeysCmp
   logSeries           : LogSeries
-  createdAccounts     : Batteries.RBSet AccountAddress compare
+  createdAccounts     : RBTree.RBSet AccountAddress compare
   deriving BEq, Inhabited, Repr
 
 /--
