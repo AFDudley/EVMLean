@@ -2523,7 +2523,7 @@ lemma lambda_projection_output_size_le_maxReturnDataSizeByGas
   let n : UInt256 := (σ.get? s |>.option ⟨0⟩ (·.nonce)) - ⟨1⟩
   let lₐ := Lambda.L_A s n ζ i
   let a : AccountAddress := (KEC lₐ).extract 12 32 |> fromByteArrayBigEndian |> Fin.ofNat _
-  let AStar := A.addAccessedAccount a
+  let AStar0 := A.addAccessedAccount a
   let existentAccount := σ.getD a default
   let collision : ByteArray × RBTree.RBSet AccountAddress compare :=
     if existentAccount.nonce ≠ ⟨0⟩ || existentAccount.code.size ≠ 0 ||
@@ -2533,7 +2533,7 @@ lemma lambda_projection_output_size_le_maxReturnDataSizeByGas
       (i, A.createdAccounts.insert a)
   let initCode := collision.1
   let createdAccountsStar := collision.2
-  let AStar := { AStar with createdAccounts := createdAccountsStar }
+  let AStar := { AStar0 with createdAccounts := createdAccountsStar }
   let newAccount : Account :=
     { existentAccount with
       nonce := existentAccount.nonce + ⟨1⟩
@@ -2548,11 +2548,11 @@ lemma lambda_projection_output_size_le_maxReturnDataSizeByGas
       blobVersionedHashes := blobVersionedHashes, blocks := blocks }
   unfold Lambda
   simp only
-  exact (by
-    simpa only [n, lₐ, a, AStar, existentAccount, collision, initCode, createdAccountsStar,
-      newAccount, σStar, exEnv] using
-      (Lambda_Xi_tuple_match_output_size_le_maxReturnDataSizeByGas a
-        σ σStar σ₀ g A AStar exEnv))
+  have h := Lambda_Xi_tuple_match_output_size_le_maxReturnDataSizeByGas a
+    σ σStar σ₀ g A AStar exEnv
+  simp only [n, lₐ, a, AStar0, AStar, existentAccount, collision, initCode, createdAccountsStar,
+    newAccount, σStar, exEnv] at h
+  exact h
 
 lemma lambda_projection_output_size_lt_uint256
     (σ σ₀ : AccountMap) (A : Substate) (s o : AccountAddress)
@@ -2705,9 +2705,9 @@ lemma theta_code_projection_output_size_le_maxReturnDataSizeByGas
       header := H, blobVersionedHashes := blobVersionedHashes, blocks := blocks }
   unfold Θ
   simp only
-  exact (by
-    simpa only [σ'₁, σ₁, I] using
-      (Xi_tuple_match_output_size_le_maxReturnDataSizeByGas σ₁ σ₀ g A I))
+  have h := Xi_tuple_match_output_size_le_maxReturnDataSizeByGas σ₁ σ₀ g A I
+  simp only [σ'₁, σ₁, I] at h
+  exact h
 
 lemma theta_code_projection_output_size_lt_uint256
     (σ σ₀ : AccountMap) (A : Substate) (s o r : AccountAddress)
@@ -3264,16 +3264,16 @@ lemma precompile_dispatch_output_size_le_maxReturnDataSizeByGas_or_calldata
     (Ξ_PointEval σ g A I)
     (default : AccountMap × UInt256 × Substate × ByteArray)
   have hbound :
-      (if pc = 1 then Ξ_ECREC σ g A I
-       else if pc = 2 then Ξ_SHA256 σ g A I
-       else if pc = 3 then Ξ_RIP160 σ g A I
-       else if pc = 4 then Ξ_ID σ g A I
-       else if pc = 5 then Ξ_EXPMOD σ g A I
-       else if pc = 6 then Ξ_BN_ADD σ g A I
-       else if pc = 7 then Ξ_BN_MUL σ g A I
-       else if pc = 8 then Ξ_SNARKV σ g A I
-       else if pc = 9 then Ξ_BLAKE2_F σ g A I
-       else if pc = 10 then Ξ_PointEval σ g A I
+      (if pc.val = 1 then Ξ_ECREC σ g A I
+       else if pc.val = 2 then Ξ_SHA256 σ g A I
+       else if pc.val = 3 then Ξ_RIP160 σ g A I
+       else if pc.val = 4 then Ξ_ID σ g A I
+       else if pc.val = 5 then Ξ_EXPMOD σ g A I
+       else if pc.val = 6 then Ξ_BN_ADD σ g A I
+       else if pc.val = 7 then Ξ_BN_MUL σ g A I
+       else if pc.val = 8 then Ξ_SNARKV σ g A I
+       else if pc.val = 9 then Ξ_BLAKE2_F σ g A I
+       else if pc.val = 10 then Ξ_PointEval σ g A I
        else default).2.2.2.size ≤ max maxReturnDataSizeByGas I.calldata.size := by
     split_ifs
     · exact precompile_ECREC_output_size_le_maxReturnDataSizeByGas_or_calldata
