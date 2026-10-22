@@ -2351,8 +2351,8 @@ lemma Xi_success_output_size_le_maxReturnDataSizeByGas
             simp only [memoryPaidByGas, Cₘ, GasConstants.Gmemory, Cₘ.QuadraticCeofficient]
             have h0 : (default : State).machineState.activeWords.toNat = 0 := by rfl
             rw [h0]
-            simpa only [Nat.mul_zero, Nat.zero_mul, Nat.zero_add, Nat.add_zero, Nat.zero_div]
-              using g.val.isLt
+            simp only [Nat.mul_zero, Nat.zero_mul, Nat.zero_add, Nat.add_zero, Nat.zero_div]
+            exact g.val.isLt
           have hout := X_success_output_size_le_maxReturnDataSizeByGas hpaid₀ hx
           simp [hx] at h
           rcases h with ⟨_, houtEq⟩
@@ -2395,8 +2395,8 @@ lemma Xi_revert_output_size_le_maxReturnDataSizeByGas
             simp only [memoryPaidByGas, Cₘ, GasConstants.Gmemory, Cₘ.QuadraticCeofficient]
             have h0 : (default : State).machineState.activeWords.toNat = 0 := by rfl
             rw [h0]
-            simpa only [Nat.mul_zero, Nat.zero_mul, Nat.zero_add, Nat.add_zero, Nat.zero_div]
-              using g.val.isLt
+            simp only [Nat.mul_zero, Nat.zero_mul, Nat.zero_add, Nat.add_zero, Nat.zero_div]
+            exact g.val.isLt
           have hout := X_revert_output_size_le_maxReturnDataSizeByGas hpaid₀ hx
           simp [hx] at h
           rcases h with ⟨_, houtEq⟩
@@ -3050,7 +3050,7 @@ private def precompileDispatchResult
     (pc : AccountAddress) (σ : AccountMap) (g : UInt256) (A : Substate)
     (I : ExecutionEnv) :
     AccountMap × UInt256 × Substate × ByteArray :=
-  match pc with
+  match pc.val with
   | 1 => Ξ_ECREC σ g A I
   | 2 => Ξ_SHA256 σ g A I
   | 3 => Ξ_RIP160 σ g A I
