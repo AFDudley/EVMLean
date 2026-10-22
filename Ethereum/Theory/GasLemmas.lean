@@ -7,6 +7,18 @@ namespace State
 def subtractGas (self : State) (d : Nat) : State :=
   { self with machineState.gasAvailable := self.machineState.gasAvailable.subNat d }
 
+-- `subtractGas` only changes `machineState.gasAvailable`. These projection
+-- equalities let `simp` reduce the other fields; a v4.33 `simp` no longer does
+-- this automatically from the record update alone.
+@[simp] theorem subtractGas_machineState_stack (self : State) (d : Nat) :
+    (self.subtractGas d).machineState.stack = self.machineState.stack := rfl
+
+@[simp] theorem subtractGas_machineState_returnData (self : State) (d : Nat) :
+    (self.subtractGas d).machineState.returnData = self.machineState.returnData := rfl
+
+@[simp] theorem subtractGas_executionEnv (self : State) (d : Nat) :
+    (self.subtractGas d).executionEnv = self.executionEnv := rfl
+
 end State
 
 namespace EVM
@@ -40,24 +52,22 @@ lemma Ccall_pos (t r val g σ μ A) : 0 < Ccall t r val g σ μ A := by
 
 lemma Ccallgas_lt_Ccall (t r val g σ μ A) :
     Ccallgas t r val g σ μ A < Ccall t r val g σ μ A := by
+  have hacc := Caccess_pos t A
+  unfold Ccall Ccallgas Cextra
   by_cases hval : val = (⟨0⟩ : UInt256)
-  · subst val
-    unfold Ccall Ccallgas Cextra Cxfer Cnew Caccess
-    simp [bne, GasConstants.Gwarmaccess, GasConstants.Gcoldaccountaccess]
-    split
-    · split <;> omega
-    · rename_i hneq
-      exact False.elim (hneq rfl)
-  · have hbne : (val != (⟨0⟩ : UInt256)) = true := by
+  · rw [if_pos hval]
+    omega
+  · rw [if_neg hval]
+    unfold Cxfer
+    have hbne : (val != (⟨0⟩ : UInt256)) = true := by
       have hbeq : (val == (⟨0⟩ : UInt256)) = false := by
         by_cases hbeq : val == (⟨0⟩ : UInt256)
         · exact False.elim (hval (beq_iff_eq.mp hbeq))
         · simpa using hbeq
       simp [bne, hbeq]
-    unfold Ccall Ccallgas Cextra Cxfer Cnew Caccess
-    simp [hbne, GasConstants.Gwarmaccess, GasConstants.Gcoldaccountaccess,
-      GasConstants.Gcallvalue, GasConstants.Gcallstipend, GasConstants.Gnewaccount]
-    split <;> omega
+    rw [if_pos hbne]
+    simp only [GasConstants.Gcallvalue, GasConstants.Gcallstipend]
+    omega
 
 lemma L_le_self (n : Nat) : L n ≤ n := by
   unfold L
@@ -1122,9 +1132,9 @@ theorem X_gas_le {fuel : Nat} {validJumps : Array UInt256} {state : State}
             rcases ro with ⟨HaltSuccess.success, o⟩
             cases HaltSuccess.success <;> simp at h
             · cases h
-              simpa using hstepLe
+              simpa [ExecutionResultGas] using hstepLe
             · cases h
-              simpa using hstepLe
+              simpa [ExecutionResultGas] using hstepLe
 
 def XiResultGas :
     ExecutionResult (AccountMap × UInt256 × Substate) →
@@ -1277,32 +1287,32 @@ lemma precompile_PointEval_gas_le (σ : AccountMap) (g : UInt256) (A : Substate)
 set_option maxRecDepth 65536 in
 lemma precompile_dispatch_match_eq_if {α : Type} (p : AccountAddress)
     (a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 d : α) :
-    (match p with
+    (match p.val with
       | 1 => a1 | 2 => a2 | 3 => a3 | 4 => a4 | 5 => a5
       | 6 => a6 | 7 => a7 | 8 => a8 | 9 => a9 | 10 => a10
       | _ => d) =
-    (if p = 1 then a1 else if p = 2 then a2 else if p = 3 then a3
-     else if p = 4 then a4 else if p = 5 then a5 else if p = 6 then a6
-     else if p = 7 then a7 else if p = 8 then a8 else if p = 9 then a9
-     else if p = 10 then a10 else d) := by
+    (if p.val = 1 then a1 else if p.val = 2 then a2 else if p.val = 3 then a3
+     else if p.val = 4 then a4 else if p.val = 5 then a5 else if p.val = 6 then a6
+     else if p.val = 7 then a7 else if p.val = 8 then a8 else if p.val = 9 then a9
+     else if p.val = 10 then a10 else d) := by
   split <;> try simp_all
   all_goals
-    have h1 : p ≠ 1 := by assumption
-    have h2 : p ≠ 2 := by assumption
-    have h3 : p ≠ 3 := by assumption
-    have h4 : p ≠ 4 := by assumption
-    have h5 : p ≠ 5 := by assumption
-    have h6 : p ≠ 6 := by assumption
-    have h7 : p ≠ 7 := by assumption
-    have h8 : p ≠ 8 := by assumption
-    have h9 : p ≠ 9 := by assumption
-    have h10 : p ≠ 10 := by assumption
+    have h1 : p.val ≠ 1 := by assumption
+    have h2 : p.val ≠ 2 := by assumption
+    have h3 : p.val ≠ 3 := by assumption
+    have h4 : p.val ≠ 4 := by assumption
+    have h5 : p.val ≠ 5 := by assumption
+    have h6 : p.val ≠ 6 := by assumption
+    have h7 : p.val ≠ 7 := by assumption
+    have h8 : p.val ≠ 8 := by assumption
+    have h9 : p.val ≠ 9 := by assumption
+    have h10 : p.val ≠ 10 := by assumption
     simp [h1, h2, h3, h4, h5, h6, h7, h8, h9, h10]
 
 set_option maxRecDepth 65536 in
 lemma precompile_dispatch_gas_le (p : AccountAddress) (σ : AccountMap)
     (g : UInt256) (A : Substate) (I : ExecutionEnv) :
-    (match p with
+    (match p.val with
       | 1 => Ξ_ECREC σ g A I
       | 2 => Ξ_SHA256 σ g A I
       | 3 => Ξ_RIP160 σ g A I

@@ -4047,13 +4047,13 @@ theorem step_call : ∀ (s : State),
             simpa [gasAvailable', gasState, gasCost, hstk, Sat256.subNat_toNat] using hgas
           by_cases hoverflow : 1024 < t.length + 1
           · simp [gasAvailable', gasState, gasCost, hgas_not, C', hstk, α, hoverflow, hnot_underflow,
-              Operation.isCreate]
+              Operation.isCreate, Fin.lt_def]
           ·
             by_cases hstatic : ¬s.executionEnv.perm ∧ value ≠ ⟨0⟩
             · have hstatic_cond : s.executionEnv.perm = false ∧ ¬ value = ({ val := 0 } : UInt256) := by
                 simpa using hstatic
               simp [gasAvailable', gasState, gasCost, hgas_not, hstatic_cond, C', hstk, α, hoverflow, hnot_underflow,
-                Operation.isCreate]
+                Operation.isCreate, Fin.lt_def]
             · have hstatic_not : ¬ (s.executionEnv.perm = false ∧ ¬ value = ({ val := 0 } : UInt256)) := by
                 simpa using hstatic
               have hdepth_eq :
@@ -4072,7 +4072,7 @@ theorem step_call : ∀ (s : State),
               simp [Id.run, Stack.pop7, Ethereum.State.replaceStackAndIncrPC, Ethereum.State.incrPC,
                 Ethereum.State.addAccessedAccount, writeBytes, call, liftM, bind, Bind.bind,
                 Except.bind, Except.pure, Pure.pure, MonadLift.monadLift]
-              simp [Stack.push, UInt256_ofNat_1, hdepth_eq]
+              simp [Stack.push, UInt256_ofNat_1, hdepth_eq, Fin.lt_def]
 
 theorem step_call' : ∀ (s : State),
   let I_b := s.executionEnv.code
@@ -4273,7 +4273,7 @@ theorem step_callcode : ∀ (s : State),
             simp [Id.run, Stack.pop7, Ethereum.State.replaceStackAndIncrPC, Ethereum.State.incrPC,
               Ethereum.State.addAccessedAccount, writeBytes, call, liftM, bind, Bind.bind,
               Except.bind, Except.pure, Pure.pure, MonadLift.monadLift]
-            simp [Stack.push, UInt256_ofNat_1, hdepth_eq]
+            simp [Stack.push, UInt256_ofNat_1, hdepth_eq, Fin.lt_def]
 
 theorem step_delegatecall : ∀ (s : State),
   let I_b := s.executionEnv.code
@@ -4412,7 +4412,7 @@ theorem step_delegatecall : ∀ (s : State),
             simp [Id.run, Stack.pop6, Ethereum.State.replaceStackAndIncrPC, Ethereum.State.incrPC,
               Ethereum.State.addAccessedAccount, writeBytes, call, liftM, bind, Bind.bind,
               Except.bind, Except.pure, Pure.pure, MonadLift.monadLift]
-            simp [Stack.push, UInt256_ofNat_1, hdepth_eq]
+            simp [Stack.push, UInt256_ofNat_1, hdepth_eq, Fin.lt_def]
 
 theorem step_staticcall : ∀ (s : State),
   let I_b := s.executionEnv.code
@@ -4550,7 +4550,7 @@ theorem step_staticcall : ∀ (s : State),
             simp [Id.run, Stack.pop6, Ethereum.State.replaceStackAndIncrPC, Ethereum.State.incrPC,
               Ethereum.State.addAccessedAccount, writeBytes, call, liftM, bind, Bind.bind,
               Except.bind, Except.pure, Pure.pure, MonadLift.monadLift]
-            simp [Stack.push, UInt256_ofNat_1, hdepth_eq]
+            simp [Stack.push, UInt256_ofNat_1, hdepth_eq, Fin.lt_def]
 
 theorem step_create : ∀ (s : State),
   let I_b := s.executionEnv.code
@@ -4794,7 +4794,7 @@ theorem step_create : ∀ (s : State),
                         simp [bind, Except.bind]
                       have hDepth_lt := hDepth_expanded.2.1
                       have hDepth_lt' : (↑s.executionEnv.depth : Nat) < 1024 := by
-                        simpa using hDepth_lt
+                        simpa [Fin.lt_def] using hDepth_lt
                       simp [hDepth_lt', hrefund_expanded]
                     ·
                       have hrefund_expanded := hrefund
@@ -4810,7 +4810,7 @@ theorem step_create : ∀ (s : State),
                       have hrefund_expanded_not := not_lt.mpr hrefund_expanded
                       have hDepth_lt := hDepth_expanded.2.1
                       have hDepth_lt' : (↑s.executionEnv.depth : Nat) < 1024 := by
-                        simpa using hDepth_lt
+                        simpa [Fin.lt_def] using hDepth_lt
                       have hDepth_ne : s.executionEnv.depth ≠ 1024 := by
                         omega
                       have hDepth_val_ne : (↑s.executionEnv.depth : Nat) ≠ 1024 := by
@@ -4831,7 +4831,7 @@ theorem step_create : ∀ (s : State),
                           (↑s.executionEnv.depth : Nat) < 1024 ∧
                             (s.machineState.memory.readWithPadding offset.toNat size.toNat).size ≤ 49152) := by
                       intro h
-                      exact hDepth_expanded ⟨h.1, by simpa using h.2.1, h.2.2⟩
+                      exact hDepth_expanded ⟨h.1, by simpa [Fin.lt_def] using h.2.1, h.2.2⟩
                     by_cases hrefund :
                         createState.machineState.gasAvailable.toNat + g'.toNat <
                           L createState.machineState.gasAvailable.toNat
@@ -5109,7 +5109,7 @@ theorem step_create2 : ∀ (s : State),
                         simp [bind, Except.bind]
                       have hDepth_lt := hDepth_expanded.2.1
                       have hDepth_lt' : (↑s.executionEnv.depth : Nat) < 1024 := by
-                        simpa using hDepth_lt
+                        simpa [Fin.lt_def] using hDepth_lt
                       simp [hDepth_lt', hrefund_expanded]
                     ·
                       have hrefund_expanded := hrefund
@@ -5125,7 +5125,7 @@ theorem step_create2 : ∀ (s : State),
                       have hrefund_expanded_not := not_lt.mpr hrefund_expanded
                       have hDepth_lt := hDepth_expanded.2.1
                       have hDepth_lt' : (↑s.executionEnv.depth : Nat) < 1024 := by
-                        simpa using hDepth_lt
+                        simpa [Fin.lt_def] using hDepth_lt
                       have hDepth_ne : s.executionEnv.depth ≠ 1024 := by
                         omega
                       have hDepth_val_ne : (↑s.executionEnv.depth : Nat) ≠ 1024 := by
@@ -5146,7 +5146,7 @@ theorem step_create2 : ∀ (s : State),
                           (↑s.executionEnv.depth : Nat) < 1024 ∧
                             (s.machineState.memory.readWithPadding offset.toNat size.toNat).size ≤ 49152) := by
                       intro h
-                      exact hDepth_expanded ⟨h.1, by simpa using h.2.1, h.2.2⟩
+                      exact hDepth_expanded ⟨h.1, by simpa [Fin.lt_def] using h.2.1, h.2.2⟩
                     by_cases hrefund :
                         createState.machineState.gasAvailable.toNat + g'.toNat <
                           L createState.machineState.gasAvailable.toNat

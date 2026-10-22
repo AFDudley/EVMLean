@@ -8,6 +8,11 @@ namespace Ethereum
 
 namespace EVM
 
+-- `Id.run (Except.ok …)` no longer reduces under a v4.33 `simp` by itself.
+-- Unfold `Id.run` for every `simp` in this file so the `≠ .error .OutOfFuel`
+-- goals close as before.
+attribute [local simp] Id.run
+
 set_option maxHeartbeats 2000000 in
 lemma Z_no_OutOfFuel {w s} validJumps :
   -- Z validJumps w s = .error e → e ≠ .OutOfFuel := by
@@ -26,17 +31,17 @@ lemma Z_no_OutOfFuel {w s} validJumps :
 @[simp] private lemma execUnOp_no_OutOfFuel (f : Primop.Unary) (s : State) :
     execUnOp f s ≠ .error .OutOfFuel := by
   unfold execUnOp
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma execBinOp_no_OutOfFuel (f : Primop.Binary) (s : State) :
     execBinOp f s ≠ .error .OutOfFuel := by
   unfold execBinOp
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma execTriOp_no_OutOfFuel (f : Primop.Ternary) (s : State) :
     execTriOp f s ≠ .error .OutOfFuel := by
   unfold execTriOp
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma executionEnvOp_no_OutOfFuel (op : ExecutionEnv → UInt256) (s : State) :
     executionEnvOp op s ≠ .error .OutOfFuel := by
@@ -47,7 +52,7 @@ lemma Z_no_OutOfFuel {w s} validJumps :
     (op : ExecutionEnv → UInt256 → UInt256) (s : State) :
     unaryExecutionEnvOp op s ≠ .error .OutOfFuel := by
   unfold unaryExecutionEnvOp
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma machineStateOp_no_OutOfFuel (op : MachineState → UInt256) (s : State) :
     machineStateOp op s ≠ .error .OutOfFuel := by
@@ -58,25 +63,25 @@ lemma Z_no_OutOfFuel {w s} validJumps :
     (op : MachineState → UInt256 → UInt256 → MachineState) (s : State) :
     binaryMachineStateOp op s ≠ .error .OutOfFuel := by
   unfold binaryMachineStateOp
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma binaryMachineStateOp'_no_OutOfFuel
     (op : MachineState → UInt256 → UInt256 → UInt256 × MachineState) (s : State) :
     binaryMachineStateOp' op s ≠ .error .OutOfFuel := by
   unfold binaryMachineStateOp'
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma ternaryMachineStateOp_no_OutOfFuel
     (op : MachineState → UInt256 → UInt256 → UInt256 → MachineState) (s : State) :
     ternaryMachineStateOp op s ≠ .error .OutOfFuel := by
   unfold ternaryMachineStateOp
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma binaryStateOp_no_OutOfFuel
     (op : State → UInt256 → UInt256 → State) (s : State) :
     binaryStateOp op s ≠ .error .OutOfFuel := by
   unfold binaryStateOp
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma stateOp_no_OutOfFuel (op : State → UInt256) (s : State) :
     stateOp op s ≠ .error .OutOfFuel := by
@@ -87,44 +92,44 @@ lemma Z_no_OutOfFuel {w s} validJumps :
     (op : State → UInt256 → State × UInt256) (s : State) :
     unaryStateOp op s ≠ .error .OutOfFuel := by
   unfold unaryStateOp
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma ternaryCopyOp_no_OutOfFuel
     (op : State → UInt256 → UInt256 → UInt256 → State) (s : State) :
     ternaryCopyOp op s ≠ .error .OutOfFuel := by
   unfold ternaryCopyOp
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma quaternaryCopyOp_no_OutOfFuel
     (op : State → UInt256 → UInt256 → UInt256 → UInt256 → State) (s : State) :
     quaternaryCopyOp op s ≠ .error .OutOfFuel := by
   unfold quaternaryCopyOp
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma log0Op_no_OutOfFuel (s : State) :
     log0Op s ≠ .error .OutOfFuel := by
   unfold log0Op
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma log1Op_no_OutOfFuel (s : State) :
     log1Op s ≠ .error .OutOfFuel := by
   unfold log1Op
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma log2Op_no_OutOfFuel (s : State) :
     log2Op s ≠ .error .OutOfFuel := by
   unfold log2Op
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma log3Op_no_OutOfFuel (s : State) :
     log3Op s ≠ .error .OutOfFuel := by
   unfold log3Op
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma log4Op_no_OutOfFuel (s : State) :
     log4Op s ≠ .error .OutOfFuel := by
   unfold log4Op
-  split <;> simp
+  split <;> simp [Id.run]
 
 @[simp] private lemma dup_no_OutOfFuel (n : ℕ) (s : State) :
     dup n s ≠ .error .OutOfFuel := by
@@ -210,9 +215,19 @@ lemma step_no_OutOfFuel {g state} instr :
   rcases instr with ⟨instr, arg⟩
   cases instr with
   | StopArith op =>
-      cases op <;> intro h <;> simp [step] at h
+      cases op <;> intro h <;> simp only [step, Id.run] at h <;>
+        first
+          | exact execBinOp_no_OutOfFuel _ _ h
+          | exact execTriOp_no_OutOfFuel _ _ h
+          | exact execUnOp_no_OutOfFuel _ _ h
+          | simp_all [step]
   | CompBit op =>
-      cases op <;> intro h <;> simp [step] at h
+      cases op <;> intro h <;> simp only [step, Id.run] at h <;>
+        first
+          | exact execBinOp_no_OutOfFuel _ _ h
+          | exact execTriOp_no_OutOfFuel _ _ h
+          | exact execUnOp_no_OutOfFuel _ _ h
+          | simp_all [step]
   | Keccak op =>
       cases op
       intro h

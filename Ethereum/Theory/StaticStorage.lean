@@ -208,8 +208,10 @@ theorem sendEth_accountStorageStateEq
           apply accountStorageStateEq_insert_preserve
           · simp [Std.ExtTreeMap.getD_eq_getD_getElem?, ← Std.ExtTreeMap.get?_eq_getElem?, hr]
           · simp [Std.ExtTreeMap.getD_eq_getD_getElem?, ← Std.ExtTreeMap.get?_eq_getElem?, hr]
-    simpa [σ₁] using accountStorageStateEq_trans hσ₁
+    have hres := accountStorageStateEq_trans hσ₁
       (accountStorageStateEq_debit_if_present σ₁ s v)
+    simp only [σ₁, bne_iff_ne, ne_eq, ite_not] at hres
+    exact hres
   · simp [hz]
 
 theorem sendEth_accountCodeStateEq
@@ -244,8 +246,10 @@ theorem sendEth_accountCodeStateEq
           simp
           apply accountCodeStateEq_insert_preserve
           simp [Std.ExtTreeMap.getD_eq_getD_getElem?, ← Std.ExtTreeMap.get?_eq_getElem?, hr]
-    simpa [σ₁] using accountCodeStateEq_trans hσ₁
+    have hres := accountCodeStateEq_trans hσ₁
       (accountCodeStateEq_debit_if_present σ₁ s v)
+    simp only [σ₁, bne_iff_ne, ne_eq, ite_not] at hres
+    exact hres
   · simp [hz]
 
 theorem sendEth_accountStaticStateEq
@@ -378,7 +382,7 @@ theorem precompile_PointEval_accountMap_empty_or_self
 theorem precompiled_result_accountMap_empty_or_self
     (pc : AccountAddress) (σ : AccountMap) (g : UInt256) (A : Substate) (I : ExecutionEnv) :
     (let result : AccountMap × UInt256 × Substate × ByteArray :=
-      match pc with
+      match pc.val with
       | 1 => Ξ_ECREC σ g A I
       | 2 => Ξ_SHA256 σ g A I
       | 3 => Ξ_RIP160 σ g A I
@@ -392,7 +396,7 @@ theorem precompiled_result_accountMap_empty_or_self
       | _ => default
      result.1) = ∅ ∨
     (let result : AccountMap × UInt256 × Substate × ByteArray :=
-      match pc with
+      match pc.val with
       | 1 => Ξ_ECREC σ g A I
       | 2 => Ξ_SHA256 σ g A I
       | 3 => Ξ_RIP160 σ g A I
@@ -439,7 +443,7 @@ theorem precompiled_Theta_accountMap_eq
           code := default, gasPrice := p.toNat, header := H, depth := e, perm := w,
           blobVersionedHashes := blobVersionedHashes, blocks := blocks }
        let result : AccountMap × UInt256 × Substate × ByteArray :=
-        match pc with
+        match pc.val with
         | 1 => Ξ_ECREC σ₁ g A I
         | 2 => Ξ_SHA256 σ₁ g A I
         | 3 => Ξ_RIP160 σ₁ g A I
@@ -939,7 +943,7 @@ lemma static_swap_accountMap_eq
 lemma static_depth_succ_measure {e : Fin 1025} {n : Nat}
     (hdepth : 1024 - e.val = n + 1) (hlt : e < 1024) :
     1024 - (e + 1).val = n := by
-  have hltVal : e.val < 1024 := by simpa using hlt
+  have hltVal : e.val < 1024 := by simpa [Fin.lt_def] using hlt
   have hval : (e + 1).val = e.val + 1 := by
     rw [Fin.val_add_eq_of_add_lt]
     simp
